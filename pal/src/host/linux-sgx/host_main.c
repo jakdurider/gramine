@@ -1183,6 +1183,9 @@ static int verify_hw_requirements(char* envp[]) {
     return 0;
 }
 
+int master;
+int first_worker;
+
 __attribute_no_sanitize_address
 int main(int argc, char* argv[], char* envp[]) {
     char* manifest_path = NULL;
@@ -1198,6 +1201,25 @@ int main(int argc, char* argv[], char* envp[]) {
         return unix_to_pal_error(ret);
     }
 #endif
+
+    /* add command line option for differentiating master process and worker process */
+    if (strcmp("master", argv[argc-1]) == 0) {
+        master = 1;
+        first_worker = 0;
+    }
+    else if (strcmp("first_worker", argv[argc-1]) == 0) {
+        master = 0;
+        first_worker = 1;
+    }
+    else if (strcmp("worker", argv[argc-1]) == 0) {
+        master = 0;
+        first_worker = 0;
+    }
+    else {
+        log_always("wrong value of original in command line");
+        return -EINVAL;
+    }
+
 
     /* Grow the stack of the main thread to THREAD_STACK_SIZE by probing each stack page above
      * the current stack pointer (Linux dynamically grows the stack of the main thread but gets
@@ -1277,10 +1299,10 @@ int main(int argc, char* argv[], char* envp[]) {
     size_t args_size;
     if (first_process) {
         args = argv[3];
-        args_size = argc > 3 ? (argv[argc - 1] - args) + strlen(argv[argc - 1]) + 1 : 0;
+        args_size = argc > 3 ? (argv[argc - 2] - args) + strlen(argv[argc - 2]) + 1 : 0;
     } else {
         args = argv[4];
-        args_size = argc > 4 ? (argv[argc - 1] - args) + strlen(argv[argc - 1]) + 1 : 0;
+        args_size = argc > 4 ? (argv[argc - 2] - args) + strlen(argv[argc - 2]) + 1 : 0;
     }
 
     size_t envc = 0;
