@@ -7,10 +7,14 @@
 #include "pal_sgx.h"
 #include "sgx_arch.h"
 
+#include <stdio.h>
+
 static int g_isgx_device = -1;
 
 static void*  g_zero_pages      = NULL;
 static size_t g_zero_pages_size = 0;
+
+extern const char* eid_path;
 
 int open_sgx_driver(void) {
     const char* paths_to_try[] = {
@@ -289,6 +293,19 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
         log_error("Enclave creation IOCTL failed: %s", unix_strerror(ret));
         return -EPERM;
     }
+
+    struct sgx_enclave_map map_param = {
+        .id = 0xffff,
+        .base = request_mmap_addr,
+    };
+    ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_GET_ID, &map_param);
+    if (ret < 0) {
+        log_error("Getting Enclave ID failed");
+        return ret;
+    }
+    FILE* eid_fpw = fopen(eid_path, "w");
+    fprintf(eid_fpw, "%lu", map_param.id);
+    fclose(eid_fpw);
 
     secs->attributes.flags |= SGX_FLAGS_INITIALIZED;
 

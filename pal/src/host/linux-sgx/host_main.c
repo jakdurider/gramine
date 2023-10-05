@@ -30,6 +30,8 @@
 #include "toml_utils.h"
 #include "topo_info.h"
 
+#include <stdio.h>
+
 const size_t g_page_size = PRESET_PAGESIZE;
 
 char* g_pal_loader_path = NULL;
@@ -39,6 +41,11 @@ pid_t g_host_pid;
 bool g_vtune_profile_enabled = false;
 
 struct pal_enclave g_pal_enclave;
+
+int master;
+int first_worker;
+int eid;
+const char* eid_path = "/sharedVolume/enclave_id";
 
 static int read_file_fragment(int fd, void* buf, size_t size, off_t offset) {
     ssize_t ret;
@@ -174,10 +181,16 @@ static int load_enclave_binary(sgx_arch_secs_t* secs, int fd, unsigned long base
             if (zeropage > zero)
                 memset(addr + zero - c->mapstart, 0, zeropage - zero);
 
-            ret = add_pages_to_enclave(secs, (void*)base + c->mapstart, addr,
-                                       c->mapend - c->mapstart,
-                                       SGX_PAGE_TYPE_REG, c->prot, /*skip_eextend=*/false,
-                                       (c->prot & PROT_EXEC) ? "code" : "data");
+            if (master) {
+                ret = add_pages_to_enclave(secs, (void*)base + c->mapstart, addr,
+                                        c->mapend - c->mapstart,
+                                        SGX_PAGE_TYPE_REG, c->prot, /*skip_eextend=*/false,
+                                        (c->prot & PROT_EXEC) ? "code" : "data");
+            }
+            else {
+                ret = add_mappings_to_enclave((void*)base + c->mapstart, c->mapend - c->mapstart,
+                                              c->prot, (c->prot & PROT_EXEC) ? "code" : "data");
+            }
 
             DO_SYSCALL(munmap, addr, c->mapend - c->mapstart);
 
@@ -186,8 +199,15 @@ static int load_enclave_binary(sgx_arch_secs_t* secs, int fd, unsigned long base
         }
 
         if (zeroend > zeropage) {
-            ret = add_pages_to_enclave(secs, (void*)base + zeropage, NULL, zeroend - zeropage,
-                                       SGX_PAGE_TYPE_REG, c->prot, false, "bss");
+            if (master) {
+                ret = add_pages_to_enclave(secs, (void*)base + zeropage, NULL, zeroend - zeropage,
+                                            SGX_PAGE_TYPE_REG, c->prot, false, "bss");
+            }
+            else {
+                ret = add_mappings_to_enclave((void*)base + zeropage, zeroend - zeropage,
+                                              c->prot, "bss");
+            }
+
             if (ret < 0)
                 goto out;
         }
@@ -329,14 +349,27 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
     memset(&enclave_secs, 0, sizeof(enclave_secs));
     enclave_secs.base = enclave->baseaddr;
     enclave_secs.size = enclave->size;
-    ret = create_enclave(&enclave_secs, &enclave_token);
-    if (ret < 0) {
-        log_error("Creating enclave failed: %s", unix_strerror(ret));
-        goto out;
-    }
 
-    /* SECS contains SSA frame size in pages, convert to size in bytes */
-    enclave->ssa_frame_size = enclave_secs.ssa_frame_size * g_page_size;
+    if (master) {
+        ret = create_enclave(&enclave_secs, &enclave_token);
+        if (ret < 0) {
+            log_error("Creating enclave failed: %s", unix_strerror(ret));
+            goto out;
+        }
+
+        /* SECS contains SSA frame size in pages, convert to size in bytes */
+        enclave->ssa_frame_size = enclave_secs.ssa_frame_size * g_page_size;
+    }
+    else {
+        ret = prepare_map_enclave(eid);
+        if (ret < 0) {
+            log_error("Prepare_map_enclave failed: %s", unix_strerror(ret));
+            goto out;
+        }
+
+        /* SECS contains SSA frame size in pages, convert to size in bytes */
+        enclave->ssa_frame_size = SSA_FRAME_SIZE;
+    }
 
     /* Start populating enclave memory */
     struct mem_area {
@@ -498,6 +531,15 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
         if (areas[i].skip_eextend && enclave->edmm_enabled) {
             assert(areas[i].data_src == ZERO);
             /* If EDMM is enabled, no need to add non-measured zero pages. */
+            /* but mapping is necessary */
+            ret = add_mappings_to_enclave((void*)areas[i].addr, areas[i].size,
+                                          areas[i].prot, areas[i].desc);
+            if (ret < 0) {
+                log_error("Mapping pages (%s) to enclave failed: %s", areas[i].desc,
+                          unix_strerror(ret));
+                goto out;
+            }
+
             continue;
         }
 
@@ -553,9 +595,25 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
             assert(areas[i].data_src == ZERO);
         }
 
-        ret = add_pages_to_enclave(&enclave_secs, (void*)areas[i].addr, data, areas[i].size,
-                                   areas[i].type, areas[i].prot, areas[i].skip_eextend,
-                                   areas[i].desc);
+        if (master) {
+            ret = add_pages_to_enclave(&enclave_secs, (void*)areas[i].addr, data, areas[i].size,
+                                    areas[i].type, areas[i].prot, areas[i].skip_eextend,
+                                       areas[i].desc);
+            if (ret < 0) {
+                log_error("Adding pages (%s) to enclave failed: %s", areas[i].desc,
+                          unix_strerror(ret));
+                goto out;
+            }
+        }
+        else {
+            ret = add_mappings_to_enclave((void*)areas[i].addr, areas[i].size,
+                                          areas[i].prot, areas[i].desc);
+            if (ret < 0) {
+                log_error("Mapping pages (%s) to enclave failed: %s", areas[i].desc,
+                          unix_strerror(ret));
+                goto out;
+            }
+        }
 
         if (data)
             DO_SYSCALL(munmap, data, areas[i].size);
@@ -568,13 +626,18 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
     }
     log_debug("Added all pages to SGX enclave");
 
-    ret = init_enclave(&enclave_secs, &enclave_sigstruct, &enclave_token);
-    if (ret < 0) {
-        log_error("Initializing enclave failed: %s", unix_strerror(ret));
-        goto out;
-    }
+    if (master) {
+        ret = init_enclave(&enclave_secs, &enclave_sigstruct, &enclave_token);
+        if (ret < 0) {
+            log_error("Initializing enclave failed: %s", unix_strerror(ret));
+            goto out;
+        }
 
-    create_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
+        create_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
+    }
+    else {
+        get_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
+    }
 
     struct enclave_dbginfo* dbg = (void*)DO_SYSCALL(mmap, DBGINFO_ADDR,
                                                     sizeof(struct enclave_dbginfo),
@@ -1183,9 +1246,6 @@ static int verify_hw_requirements(char* envp[]) {
     return 0;
 }
 
-int master;
-int first_worker;
-
 __attribute_no_sanitize_address
 int main(int argc, char* argv[], char* envp[]) {
     char* manifest_path = NULL;
@@ -1220,6 +1280,14 @@ int main(int argc, char* argv[], char* envp[]) {
         return -EINVAL;
     }
 
+    if (!master) {
+        FILE* eid_fpw = fopen(eid_path, "r");
+        int temp_ret = fscanf(eid_fpw, "%d", &eid);
+        if (temp_ret < 0) {
+            log_error("enclave id scanf failed");
+        } 
+        fclose(eid_fpw);
+    }
 
     /* Grow the stack of the main thread to THREAD_STACK_SIZE by probing each stack page above
      * the current stack pointer (Linux dynamically grows the stack of the main thread but gets
