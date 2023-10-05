@@ -162,6 +162,69 @@ bool is_wrfsbase_supported(void) {
     return true;
 }
 
+int prepare_map_enclave(unsigned long id) {
+    int ret;
+    do {
+        ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_OPEN_REMAP, &id);
+    } while (ret == -EBUSY);
+
+    if (ret < 0) {
+        log_always("open remap failed with ret: %d", ret);
+        return ret;
+    }
+
+    struct sgx_enclave_location loc_param = {
+        .id = id
+    };
+    do {
+        ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_GET_LOCATION_BY_ID, &loc_param);
+    } while (ret == -EBUSY);
+
+    if (ret < 0) {
+        log_always("get_location_by_id failed with ret: %d", ret);
+        return ret;
+    }
+
+    uint64_t request_mmap_addr = loc_param.base;
+    uint64_t request_mmap_size = loc_param.size;
+
+#ifndef CONFIG_SGX_DRIVER_OOT
+    /* newer DCAP/in-kernel SGX drivers allow starting enclave address space with non-zero;
+     * the below trick to start from MMAP_MIN_ADDR is to avoid vm.mmap_min_addr==0 issue */
+    if (request_mmap_addr < MMAP_MIN_ADDR) {
+        request_mmap_size -= MMAP_MIN_ADDR - request_mmap_addr;
+        request_mmap_addr  = MMAP_MIN_ADDR;
+    }
+#endif
+
+    // Pre-allocate this region for enclave mapping
+    uint64_t addr = DO_SYSCALL(mmap, request_mmap_addr, request_mmap_size,
+                               PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED | MAP_SHARED,
+                               g_isgx_device, 0);
+
+    if (IS_PTR_ERR(addr) && PTR_TO_ERR(addr) == -EACCES) {
+        /* OOT DCAP driver (e.g. v1.33.2 found on MS Azure VMs with Ubuntu 18.04) requires
+         * different mmap flags */
+        /* TODO: remove this fallback after we drop Ubuntu 18.04 */
+        addr = DO_SYSCALL(mmap, request_mmap_addr, request_mmap_size,
+                          PROT_NONE, MAP_FIXED | MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    }
+
+    if (IS_PTR_ERR(addr)) {
+        int ret = PTR_TO_ERR(addr);
+        if (ret == -EPERM) {
+            log_error("Permission denied on mapping enclave. "
+                      "You may need to set sysctl vm.mmap_min_addr to zero");
+        }
+
+        log_error("Allocation of EPC memory failed: %s", unix_strerror(ret));
+        return ret;
+    }
+
+    assert(addr == request_mmap_addr);
+    return ret;
+}
+
 int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
     assert(secs->size && IS_POWER_OF_2(secs->size));
     assert(IS_ALIGNED(secs->base, secs->size));
@@ -196,7 +259,7 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
          * different mmap flags */
         /* TODO: remove this fallback after we drop Ubuntu 18.04 */
         addr = DO_SYSCALL(mmap, request_mmap_addr, request_mmap_size,
-                          PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                          PROT_NONE, MAP_FIXED | MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     }
 
     if (IS_PTR_ERR(addr)) {
@@ -268,6 +331,20 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
     return 0;
 }
 
+int add_mappings_to_enclave(void* addr, unsigned long size, int prot, const char* comment) {
+    int ret;
+
+    uint64_t mapped = DO_SYSCALL(mmap, addr, size, prot, MAP_FIXED | MAP_SHARED, g_isgx_device, 0);
+    if (IS_PTR_ERR(mapped)) {
+        ret = PTR_TO_ERR(mapped);
+        log_error("comment with %s", comment);
+        log_error("Cannot map enclave pages: ret: %d", ret);
+        return ret;
+    }
+
+    return 0;
+}
+
 int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, unsigned long size,
                          enum sgx_page_type type, int prot, bool skip_eextend,
                          const char* comment) {
@@ -277,7 +354,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
     if (!g_zero_pages) {
         /* initialize with just one page */
         g_zero_pages = (void*)DO_SYSCALL(mmap, NULL, g_page_size, PROT_READ,
-                                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
         if (IS_PTR_ERR(g_zero_pages)) {
             ret = PTR_TO_ERR(g_zero_pages);
             log_error("Cannot mmap zero pages: %s", unix_strerror(ret));
@@ -361,7 +438,7 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
             return ret;
         }
 
-        g_zero_pages = (void*)DO_SYSCALL(mmap, NULL, size, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS,
+        g_zero_pages = (void*)DO_SYSCALL(mmap, NULL, size, PROT_READ, MAP_SHARED | MAP_ANONYMOUS,
                                          -1, 0);
         if (IS_PTR_ERR(g_zero_pages)) {
             ret = PTR_TO_ERR(g_zero_pages);
