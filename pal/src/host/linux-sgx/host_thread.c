@@ -13,10 +13,19 @@
 #include "host_internal.h"
 #include "spinlock.h"
 
+const char* tcs_fd_path = "/sharedVolume/tcs_map";
+
 struct thread_map {
     unsigned int    tid;
     sgx_arch_tcs_t* tcs;
+    uint64_t stack;
+    bool thread_for_new_process;
+    bool used_by_new_process;
+    int process_id; // which process(container) is using this thread
+    bool stop_complete; // to indicate this thread stops from master process
 };
+
+static int tcs_map_fd;
 
 static sgx_arch_tcs_t* g_enclave_tcs;
 static int g_enclave_thread_num;
@@ -92,18 +101,45 @@ void create_tcs_mapper(void* tcs_base, unsigned int thread_num) {
 
     g_enclave_tcs = tcs_base;
     g_enclave_thread_num = thread_num;
+
+    /* Enclave thread info should be shared between multiple processes */
+    tcs_map_fd = DO_SYSCALL(open, tcs_fd_path, O_RDWR | O_CREAT, 0666);
+    DO_SYSCALL(ftruncate, tcs_map_fd, thread_map_size);
     g_enclave_thread_map = (struct thread_map*)DO_SYSCALL(mmap, NULL, thread_map_size,
                                                           PROT_READ | PROT_WRITE,
-                                                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                                                          MAP_SHARED, tcs_map_fd, 0);
 
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
     for (uint32_t i = 0; i < thread_num; i++) {
         g_enclave_thread_map[i].tid = 0;
         g_enclave_thread_map[i].tcs = &g_enclave_tcs[i];
+        g_enclave_thread_map[i].stack = 0;
+        g_enclave_thread_map[i].thread_for_new_process = 0;
+        g_enclave_thread_map[i].used_by_new_process = 0;
+        g_enclave_thread_map[i].process_id = 0;
+        g_enclave_thread_map[i].stop_complete = 0;
     }
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+}
+
+void get_tcs_mapper(void* tcs_base, unsigned int thread_num) {
+    size_t thread_map_size = ALIGN_UP_POW2(sizeof(struct thread_map) * thread_num, PRESET_PAGESIZE);
+
+    g_enclave_tcs = tcs_base;
+    g_enclave_thread_num = thread_num;
+
+    /* Enclave thread info should be shared between multiple processes */
+    tcs_map_fd = DO_SYSCALL(open, tcs_fd_path, O_RDWR | O_CREAT, 0666);
+    g_enclave_thread_map = (struct thread_map*)DO_SYSCALL(mmap, NULL, thread_map_size,
+                                                          PROT_READ | PROT_WRITE,
+                                                          MAP_SHARED, tcs_map_fd, 0);
+
+
 }
 
 void map_tcs(unsigned int tid) {
     spinlock_lock(&tcs_lock);
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
     for (int i = 0; i < g_enclave_thread_num; i++)
         if (!g_enclave_thread_map[i].tid) {
             g_enclave_thread_map[i].tid = tid;
@@ -111,11 +147,13 @@ void map_tcs(unsigned int tid) {
             ((struct enclave_dbginfo*)DBGINFO_ADDR)->thread_tids[i] = tid;
             break;
         }
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
 }
 
 void unmap_tcs(void) {
     spinlock_lock(&tcs_lock);
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
 
     int index = pal_get_host_tcb()->tcs - g_enclave_tcs;
     struct thread_map* map = &g_enclave_thread_map[index];
@@ -125,15 +163,23 @@ void unmap_tcs(void) {
     pal_get_host_tcb()->tcs = NULL;
     ((struct enclave_dbginfo*)DBGINFO_ADDR)->thread_tids[index] = 0;
     map->tid = 0;
+    map->stack = 0;
+    map->thread_for_new_process = 0;
+    map->used_by_new_process = 0;
+    map->process_id = 0;
+    map->stop_complete = 0;
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
 }
 
 int current_enclave_thread_cnt(void) {
     int ret = 0;
     spinlock_lock(&tcs_lock);
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
     for (int i = 0; i < g_enclave_thread_num; i++)
         if (g_enclave_thread_map[i].tid)
             ret++;
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
     return ret;
 }
@@ -290,7 +336,9 @@ int clone_thread(void) {
 
 int get_tid_from_tcs(void* tcs) {
     int index = (sgx_arch_tcs_t*)tcs - g_enclave_tcs;
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
     struct thread_map* map = &g_enclave_thread_map[index];
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     if (index >= g_enclave_thread_num)
         return -EINVAL;
     if (!map->tid)
