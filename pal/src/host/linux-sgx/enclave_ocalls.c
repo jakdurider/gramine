@@ -1006,6 +1006,25 @@ int ocall_clone_thread(void) {
     return retval;
 }
 
+int ocall_clone_thread_custom(void) {
+    int retval = 0;
+    void* dummy = NULL;
+    /* FIXME: if there was an EINTR, there may be an untrusted thread left over */
+    do {
+        /* clone must happen in the context of current (enclave) thread, cannot use exitless;
+         * in particular, the new (enclave) thread must have the same signal mask as the current
+         * enclave thread (and NOT signal mask of the RPC thread) */
+        retval = sgx_ocall(OCALL_CLONE_THREAD_CUSTOM, dummy);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -ENOMEM && retval != -EAGAIN && retval != -EINVAL &&
+            retval != -EPERM) {
+        retval = -EPERM;
+    }
+
+    return retval;
+}
+
 int ocall_stop(void) {
     int retval = 0;
     void* dummy = NULL;

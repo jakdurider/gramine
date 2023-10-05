@@ -121,11 +121,14 @@ void async_exit_pointer_end(void);
 
 int get_tid_from_tcs(void* tcs);
 int clone_thread(void);
+int clone_thread_custom(void);
 
 void create_tcs_mapper(void* tcs_base, unsigned int thread_num);
 void get_tcs_mapper(void* tcs_base, unsigned int thread_num);
 int pal_thread_init(void* tcbptr);
+int pal_thread_init_custom(void* tcbptr);
 void map_tcs(unsigned int tid);
+void map_tcs_custom(unsigned int tid);
 void unmap_tcs(void);
 int current_enclave_thread_cnt(void);
 void thread_exit(int status);

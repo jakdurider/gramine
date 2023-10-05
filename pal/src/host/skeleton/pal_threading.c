@@ -16,6 +16,10 @@ int _PalThreadCreate(PAL_HANDLE* handle, int (*callback)(void*), void* param) {
     return -PAL_ERROR_NOTIMPLEMENTED;
 }
 
+int _PalThreadCreateCustom(PAL_HANDLE* handle, int (*callback)(void*), void* param) {
+    return -PAL_ERROR_NOTIMPLEMENTED;
+}
+
 /* PAL call PalThreadYieldExecution. Yield the execution
    of the current thread. */
 void _PalThreadYieldExecution(void) {

@@ -120,6 +120,9 @@ static noreturn void pal_thread_exit_wrapper(int ret_val) {
     _PalThreadExit(/*clear_child_tid=*/NULL);
 }
 
+int _PalThreadCreateCustom(PAL_HANDLE* handle, int (*callback)(void*), void* param) {
+    return _PalThreadCreate(handle, callback, param);
+}
 int _PalThreadCreate(PAL_HANDLE* handle, int (*callback)(void*), void* param) {
     int ret = 0;
     PAL_HANDLE hdl = NULL;

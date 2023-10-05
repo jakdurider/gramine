@@ -74,6 +74,51 @@ void pal_start_thread(void) {
     /* UNREACHABLE */
 }
 
+int _PalThreadCreateCustom(PAL_HANDLE* handle, int (*callback)(void*), void* param) {
+    int ret;
+    PAL_HANDLE new_thread = calloc(1, HANDLE_SIZE(thread));
+    if (!new_thread)
+        return -PAL_ERROR_NOMEM;
+
+    init_handle_hdr(new_thread, PAL_TYPE_THREAD);
+
+    new_thread->thread.tcs = NULL;
+    INIT_LIST_HEAD(&new_thread->thread, list);
+    struct thread_param* thread_param = malloc(sizeof(struct thread_param));
+    if (!thread_param) {
+        ret = -PAL_ERROR_NOMEM;
+        goto out_err;
+    }
+    thread_param->callback = callback;
+    thread_param->param    = param;
+    new_thread->thread.param = (void*)thread_param;
+
+    spinlock_lock(&g_thread_list_lock);
+    LISTP_ADD_TAIL(&new_thread->thread, &g_thread_list, list);
+    spinlock_unlock(&g_thread_list_lock);
+
+    ret = ocall_clone_thread_custom();
+    if (ret < 0) {
+        ret = unix_to_pal_error(ret);
+        spinlock_lock(&g_thread_list_lock);
+        LISTP_DEL(&new_thread->thread, &g_thread_list, list);
+        spinlock_unlock(&g_thread_list_lock);
+        goto out_err;
+    }
+
+    /* There can be subtle race between the parent and child so hold the parent until child updates
+     * its tcs. */
+    while (!__atomic_load_n(&new_thread->thread.tcs, __ATOMIC_ACQUIRE))
+        CPU_RELAX();
+
+    *handle = new_thread;
+    return 0;
+out_err:
+    free(thread_param);
+    free(new_thread);
+    return ret;
+}
+
 int _PalThreadCreate(PAL_HANDLE* handle, int (*callback)(void*), void* param) {
     int ret;
     PAL_HANDLE new_thread = calloc(1, HANDLE_SIZE(thread));

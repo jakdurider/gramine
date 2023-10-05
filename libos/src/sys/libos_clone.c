@@ -247,7 +247,15 @@ long libos_syscall_clone(unsigned long flags, unsigned long user_stack_addr, int
         return -EINVAL;
     }
 
-    /* CLONE_DETACHED is deprecated and ignored. */
+    /* CLONE_DETACHED is deprecated, but will use for distinguishing
+     * pthread_create and pthread_create_custom */
+    bool custom_clone;
+    if (flags & CLONE_DETACHED) {
+        custom_clone = true;
+    }
+    else {
+        custom_clone = false;
+    }
     flags &= ~CLONE_DETACHED;
 
     /* These 2 flags modify ptrace behavior and can be ignored in Gramine. */
@@ -427,7 +435,13 @@ long libos_syscall_clone(unsigned long flags, unsigned long user_stack_addr, int
     }
 
     PAL_HANDLE pal_handle = NULL;
-    ret = PalThreadCreate(clone_implementation_wrapper, &new_args, &pal_handle);
+
+    if (custom_clone) {
+        ret = PalThreadCreateCustom(clone_implementation_wrapper, &new_args, &pal_handle);
+    }
+    else {
+        ret = PalThreadCreate(clone_implementation_wrapper, &new_args, &pal_handle);
+    }
     if (ret < 0) {
         ret = pal_to_unix_errno(ret);
         goto clone_thread_failed;

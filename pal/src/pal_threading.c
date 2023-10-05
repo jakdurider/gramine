@@ -15,6 +15,12 @@ int PalThreadCreate(int (*callback)(void*), void* param, PAL_HANDLE* handle) {
     return _PalThreadCreate(handle, callback, param);
 }
 
+/* PAL call PalThreadCreateCustom: create a thread inside the current process */
+int PalThreadCreateCustom(int (*callback)(void*), void* param, PAL_HANDLE* handle) {
+    *handle = NULL;
+    return _PalThreadCreateCustom(handle, callback, param);
+}
+
 /* PAL call PalThreadYieldExecution. Yield the execution of the current thread. */
 void PalThreadYieldExecution(void) {
     _PalThreadYieldExecution();

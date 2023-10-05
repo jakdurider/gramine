@@ -3,6 +3,7 @@ PalVirtualMemoryFree
 PalVirtualMemoryProtect
 PalSetMemoryBookkeepingUpcalls
 PalThreadCreate
+PalThreadCreateCustom
 PalThreadYieldExecution
 PalThreadExit
 PalThreadResume

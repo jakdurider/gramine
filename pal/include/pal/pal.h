@@ -665,6 +665,7 @@ int PalSocketRecv(PAL_HANDLE handle, struct iovec* iov, size_t iov_len, size_t* 
  * \param[out] handle  On success contains the thread handle.
  */
 int PalThreadCreate(int (*callback)(void*), void* param, PAL_HANDLE* handle);
+int PalThreadCreateCustom(int (*callback)(void*), void* param, PAL_HANDLE* handle);
 
 /*!
  * \brief Yield the current thread such that the host scheduler can reschedule it.

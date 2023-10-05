@@ -248,6 +248,11 @@ static long sgx_ocall_clone_thread(void* args) {
     return clone_thread();
 }
 
+static long sgx_ocall_clone_thread_custom(void* args) {
+    __UNUSED(args);
+    return clone_thread_custom();
+}
+
 static long sgx_ocall_stop(void* args) {
     __UNUSED(args);
 
@@ -786,6 +791,7 @@ sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_SCHED_SETAFFINITY]        = sgx_ocall_sched_setaffinity,
     [OCALL_SCHED_GETAFFINITY]        = sgx_ocall_sched_getaffinity,
     [OCALL_CLONE_THREAD]             = sgx_ocall_clone_thread,
+    [OCALL_CLONE_THREAD_CUSTOM]      = sgx_ocall_clone_thread_custom,
     [OCALL_CREATE_PROCESS]           = sgx_ocall_create_process,
     [OCALL_FUTEX]                    = sgx_ocall_futex,
     [OCALL_SOCKET]                   = sgx_ocall_socket,

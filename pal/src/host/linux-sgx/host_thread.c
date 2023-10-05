@@ -11,7 +11,10 @@
 #include "gdb_integration/sgx_gdb.h"
 #include "host_ecalls.h"
 #include "host_internal.h"
+#include "pal_tcb.h"
 #include "spinlock.h"
+
+#include <unistd.h> // sleep function
 
 struct thread_map {
     unsigned int    tid;
@@ -28,7 +31,6 @@ static int g_enclave_thread_num;
 static struct thread_map* g_enclave_thread_map;
 
 bool g_sgx_enable_stats = false;
-
 
 const char* tcs_fd_path = "/sharedVolume/tcs_map";
 static int tcs_map_fd;
@@ -144,12 +146,31 @@ void map_tcs(unsigned int tid) {
     for (int i = 0; i < g_enclave_thread_num; i++)
         if (!g_enclave_thread_map[i].tid) {
             g_enclave_thread_map[i].tid = tid;
+            g_enclave_thread_map[i].process_id = process_id;
             pal_get_host_tcb()->tcs = g_enclave_thread_map[i].tcs;
             ((struct enclave_dbginfo*)DBGINFO_ADDR)->thread_tids[i] = tid;
             break;
         }
     DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
+}
+
+void map_tcs_custom(unsigned int tid) {
+    int i = g_enclave_thread_num;
+    while (i == g_enclave_thread_num) {
+        spinlock_lock(&tcs_lock);
+        DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+        for (i = 0; i < g_enclave_thread_num; ++i){
+            if (g_enclave_thread_map[i].tid == tid && g_enclave_thread_map[i].process_id == process_id) {
+                pal_get_host_tcb()->tcs = g_enclave_thread_map[i].tcs;
+                ((struct enclave_dbginfo*)DBGINFO_ADDR)->thread_tids[i] = tid;
+                break;
+            }
+        }
+        DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+        spinlock_unlock(&tcs_lock);
+        usleep(100000);
+    }
 }
 
 void unmap_tcs(void) {
@@ -219,6 +240,63 @@ int pal_thread_init(void* tcbptr) {
 
     int tid = DO_SYSCALL(gettid);
     map_tcs(tid); /* updates tcb->tcs */
+
+    if (!tcb->tcs) {
+        log_error(
+            "There are no available TCS pages left for a new thread!\n"
+            "Please try to increase sgx.max_threads in the manifest.\n"
+            "The current value is %d",
+            g_enclave_thread_num);
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    if (!tcb->stack) {
+        /* only first thread doesn't have a stack (it uses the one provided by Linux); first
+         * thread calls ecall_enclave_start() instead of ecall_thread_start() so just exit */
+        return 0;
+    }
+
+    /* not-first (child) thread, start it */
+    ecall_thread_start();
+
+    unmap_tcs();
+    ret = 0;
+out:
+#ifdef ASAN
+    asan_unpoison_region((uintptr_t)tcb->stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
+#endif
+    DO_SYSCALL(munmap, tcb->stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
+    return ret;
+}
+
+__attribute_no_sanitize_address
+int pal_thread_init_custom(void* tcbptr) {
+    PAL_HOST_TCB* tcb = tcbptr;
+    int ret;
+
+    /* set GS reg of this thread to thread's TCB; after this point, can use pal_get_host_tcb() */
+    ret = DO_SYSCALL(arch_prctl, ARCH_SET_GS, tcb);
+    if (ret < 0) {
+        ret = -EPERM;
+        goto out;
+    }
+
+    if (tcb->alt_stack) {
+        stack_t ss = {
+            .ss_sp    = tcb->alt_stack,
+            .ss_flags = 0,
+            .ss_size  = ALT_STACK_SIZE - sizeof(*tcb)
+        };
+        ret = DO_SYSCALL(sigaltstack, &ss, NULL);
+        if (ret < 0) {
+            ret = -EPERM;
+            goto out;
+        }
+    }
+
+    int tid = DO_SYSCALL(gettid);
+    map_tcs_custom(tid); /* updates tcb->tcs */
 
     if (!tcb->tcs) {
         log_error(
@@ -332,6 +410,64 @@ int clone_thread(void) {
         DO_SYSCALL(munmap, stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
         return ret;
     }
+    return 0;
+}
+
+int clone_thread_custom(void) {
+    int ret = 0;
+
+    void* stack = (void*)DO_SYSCALL(mmap, NULL, THREAD_STACK_SIZE + ALT_STACK_SIZE,
+                                    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (IS_PTR_ERR(stack))
+        return -ENOMEM;
+
+    /* Stack layout for the new thread looks like this (recall that stacks grow towards lower
+     * addresses on Linux on x86-64):
+     *
+     *       stack +--> +-------------------+
+     *                  |  child stack      | THREAD_STACK_SIZE
+     * child_stack +--> +-------------------+
+     *                  |  alternate stack  | ALT_STACK_SIZE - sizeof(PAL_HOST_TCB)
+     *         tcb +--> +-------------------+
+     *                  |  PAL TCB          | sizeof(PAL_HOST_TCB)
+     *                  +-------------------+
+     *
+     * Note that this whole memory region is zeroed out because we use mmap(). */
+
+    void* child_stack_top = stack + THREAD_STACK_SIZE;
+
+    /* initialize TCB at the top of the alternative stack */
+    PAL_HOST_TCB* tcb = child_stack_top + ALT_STACK_SIZE - sizeof(PAL_HOST_TCB);
+    pal_host_tcb_init(tcb, stack, child_stack_top);
+
+    /* align child_stack to 16 */
+    child_stack_top = ALIGN_DOWN_PTR(child_stack_top, 16);
+
+    // TODO: pal_thread_init_custom() may fail during initialization (e.g. on TCS exhaustion), we should
+    // check its result (but this happens asynchronously, so it's not trivial to do).
+    ret = clone(pal_thread_init_custom, child_stack_top,
+                CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SYSVSEM | CLONE_THREAD | CLONE_SIGHAND,
+                tcb, /*parent_tid=*/NULL, /*tls=*/NULL, /*child_tid=*/NULL, thread_exit);
+
+    if (ret < 0) {
+        DO_SYSCALL(munmap, stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
+        return ret;
+    }
+
+    log_always("clone_thread_custom of process_id: %d, tid: %u is called", process_id, ret);
+
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+    for (int i = 0; i < g_enclave_thread_num; ++i) {
+        if (!g_enclave_thread_map[i].tid) {
+            g_enclave_thread_map[i].tid = ret;
+            g_enclave_thread_map[i].process_id = process_id;
+            g_enclave_thread_map[i].thread_for_new_process = true;
+            g_enclave_thread_map[i].stack = (uint64_t)stack;
+            break;
+        }
+    }
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+
     return 0;
 }
 
