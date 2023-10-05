@@ -979,4 +979,6 @@ void PalDebugMapRemove(void* start_addr);
  * DEBUG, falls back to raw value ("0x1234"). */
 void PalDebugDescribeLocation(uintptr_t addr, char* buf, size_t buf_size);
 
+void PalStop(void);
+
 #undef INSIDE_PAL_H

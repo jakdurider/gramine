@@ -268,6 +268,10 @@ int _PalThreadGetCpuAffinity(PAL_HANDLE thread, unsigned long* cpu_mask, size_t 
     return 0;
 }
 
+void _PalStop(void) {
+    return;
+}
+
 struct handle_ops g_thread_ops = {
     /* nothing */
 };

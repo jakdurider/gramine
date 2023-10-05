@@ -30,7 +30,8 @@
 #include "toml_utils.h"
 #include "topo_info.h"
 
-#include <stdio.h>
+#include <stdio.h> // FILE operation
+#include <stdlib.h> // rand operation
 
 const size_t g_page_size = PRESET_PAGESIZE;
 
@@ -46,6 +47,7 @@ int master;
 int first_worker;
 int eid;
 const char* eid_path = "/sharedVolume/enclave_id";
+int process_id;
 
 static int read_file_fragment(int fd, void* buf, size_t size, off_t offset) {
     ssize_t ret;
@@ -1261,6 +1263,13 @@ int main(int argc, char* argv[], char* envp[]) {
         return unix_to_pal_error(ret);
     }
 #endif
+
+    // allocate each gramine instance random process id
+    struct timeval rand_tv;
+    DO_SYSCALL(gettimeofday, &rand_tv, NULL);
+    uint64_t rand_time = rand_tv.tv_sec * 1000000UL + rand_tv.tv_usec;
+    srand(rand_time);
+    process_id = rand();
 
     /* add command line option for differentiating master process and worker process */
     if (strcmp("master", argv[argc-1]) == 0) {

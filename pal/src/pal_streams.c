@@ -458,3 +458,7 @@ out:
 int PalDebugLog(const void* buffer, size_t size) {
     return _PalDebugLog(buffer, size);
 }
+
+void PalStop(void) {
+    _PalStop();
+}

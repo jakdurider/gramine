@@ -26,6 +26,8 @@
 #include "sgx_arch.h"
 #include "sigset.h"
 
+#include <unistd.h>
+
 #define DEFAULT_BACKLOG 2048
 
 extern bool g_vtune_profile_enabled;
@@ -244,6 +246,15 @@ static long sgx_ocall_sched_getaffinity(void* args) {
 static long sgx_ocall_clone_thread(void* args) {
     __UNUSED(args);
     return clone_thread();
+}
+
+static long sgx_ocall_stop(void* args) {
+    __UNUSED(args);
+
+    stop_complete();
+
+    sleep(100000000);
+    return 0;
 }
 
 static long sgx_ocall_create_process(void* args) {
@@ -801,6 +812,7 @@ sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_EDMM_MODIFY_PAGES_TYPE]   = sgx_ocall_edmm_modify_pages_type,
     [OCALL_EDMM_REMOVE_PAGES]        = sgx_ocall_edmm_remove_pages,
     [OCALL_EDMM_RESTRICT_PAGES_PERM] = sgx_ocall_edmm_restrict_pages_perm,
+    [OCALL_STOP]                     = sgx_ocall_stop,
 };
 
 static int rpc_thread_loop(void* arg) {

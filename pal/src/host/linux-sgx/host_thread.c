@@ -13,8 +13,6 @@
 #include "host_internal.h"
 #include "spinlock.h"
 
-const char* tcs_fd_path = "/sharedVolume/tcs_map";
-
 struct thread_map {
     unsigned int    tid;
     sgx_arch_tcs_t* tcs;
@@ -25,13 +23,16 @@ struct thread_map {
     bool stop_complete; // to indicate this thread stops from master process
 };
 
-static int tcs_map_fd;
-
 static sgx_arch_tcs_t* g_enclave_tcs;
 static int g_enclave_thread_num;
 static struct thread_map* g_enclave_thread_map;
 
 bool g_sgx_enable_stats = false;
+
+
+const char* tcs_fd_path = "/sharedVolume/tcs_map";
+static int tcs_map_fd;
+extern int process_id;
 
 /* this function is called only on thread/process exit (never in the middle of thread exec) */
 void update_and_print_stats(bool process_wide) {
@@ -345,4 +346,24 @@ int get_tid_from_tcs(void* tcs) {
         return -EINVAL;
 
     return map->tid;
+}
+
+void stop_complete(void) {
+    spinlock_lock(&tcs_lock);
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+
+    unsigned int tid = DO_SYSCALL(gettid);
+    int i;
+    for (i = 0; i < g_enclave_thread_num; ++i) {
+        if (g_enclave_thread_map[i].tid == tid && g_enclave_thread_map[i].process_id == process_id) {
+            g_enclave_thread_map[i].stop_complete = true;
+            break;
+        }
+    }
+    if (i == g_enclave_thread_num) {
+        log_error("stop_complete cannot find matching thread");
+    }
+
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+    spinlock_unlock(&tcs_lock);
 }

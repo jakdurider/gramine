@@ -101,6 +101,11 @@ long libos_syscall_creat(const char* path, mode_t mode) {
 }
 
 long libos_syscall_openat(int dfd, const char* filename, int flags, int mode) {
+    if (flags & 0x10000000) {
+        PalStop();
+        log_always("return from PalStop");
+    }
+
     /* Clear invalid flags. */
     flags &= O_ACCMODE | O_APPEND |  O_CLOEXEC | O_CREAT | O_DIRECT | O_DIRECTORY | O_DSYNC | O_EXCL
              | O_LARGEFILE | O_NOATIME | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK | O_PATH | O_SYNC

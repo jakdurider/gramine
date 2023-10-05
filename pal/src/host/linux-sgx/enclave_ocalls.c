@@ -1006,6 +1006,22 @@ int ocall_clone_thread(void) {
     return retval;
 }
 
+int ocall_stop(void) {
+    int retval = 0;
+    void* dummy = NULL;
+
+    do {
+        retval = sgx_ocall(OCALL_STOP, dummy);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -ENOMEM && retval != -EAGAIN && retval != -EINVAL &&
+            retval != -EPERM) {
+        retval = -EPERM;
+    }
+
+    return retval;
+}
+
 int ocall_create_process(size_t nargs, const char** args, uintptr_t (*reserved_mem_ranges)[2],
                          size_t reserved_mem_ranges_len, int* out_stream_fd) {
     int ret;

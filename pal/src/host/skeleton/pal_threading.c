@@ -40,6 +40,10 @@ int _PalThreadGetCpuAffinity(PAL_HANDLE thread, unsigned long* cpu_mask, size_t 
     return -PAL_ERROR_NOTIMPLEMENTED;
 }
 
+void _PalStop(void) {
+    return -PAL_ERROR_NOTIMPLEMENTED;
+}
+
 struct handle_ops g_thread_ops = {
     /* nothing */
 };

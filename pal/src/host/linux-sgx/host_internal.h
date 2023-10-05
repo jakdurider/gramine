@@ -196,3 +196,5 @@ int pd_event_sample_simple(struct perf_data* pd, uint64_t ip, uint32_t pid, uint
 /* Write PERF_RECORD_SAMPLE (with stack sample, at most PD_STACK_SIZE bytes) */
 int pd_event_sample_stack(struct perf_data* pd,  uint64_t ip, uint32_t pid, uint32_t tid,
                           uint64_t period, sgx_pal_gpr_t* gpr, void* stack, size_t stack_size);
+
+void stop_complete(void);
