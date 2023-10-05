@@ -113,6 +113,7 @@ int init_enclave(sgx_arch_secs_t* secs, sgx_sigstruct_t* sigstruct, sgx_arch_tok
 
 int sgx_ecall(long ecall_no, void* ms);
 int sgx_raise(int event);
+void sgx_resume(void);
 
 void async_exit_pointer(void);
 void eresume_pointer(void);

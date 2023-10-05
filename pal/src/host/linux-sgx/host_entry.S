@@ -5,6 +5,43 @@
     .extern tcs_base
     .extern g_in_aex_profiling
 
+    .global sgx_eresume
+    .type sgx_eresume, @function
+sgx_eresume:
+    .cfi_startproc
+
+    pushq %rbx
+    .cfi_adjust_cfa_offset 8
+    pushq %rbp
+    .cfi_adjust_cfa_offset 8
+    pushq %r12
+    .cfi_adjust_cfa_offset 8
+    pushq %r13
+    .cfi_adjust_cfa_offset 8
+    pushq %r14
+    .cfi_adjust_cfa_offset 8
+    pushq %r15
+    .cfi_adjust_cfa_offset 8
+
+    # RDI - return value
+    # RSI - external event
+    movq $0, %rdi
+    movq $PAL_EVENT_NO_EVENT, %rsi
+    lock xchgl %esi, %gs:PAL_HOST_TCB_LAST_ASYNC_EVENT
+
+    # RBX has to be the TCS of the thread
+    movq %gs:PAL_HOST_TCB_TCS, %rbx
+
+    # RCX has to be the AEP (Asynchronous Exit Pointer)
+    leaq async_exit_pointer(%rip), %rcx
+
+    movq $EENTER, %rax
+    enclu
+
+    jmp .Lafter_resume
+    .cfi_endproc
+
+
     .global sgx_ecall
     .type sgx_ecall, @function
 
