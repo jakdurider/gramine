@@ -113,7 +113,7 @@ int init_enclave(sgx_arch_secs_t* secs, sgx_sigstruct_t* sigstruct, sgx_arch_tok
 
 int sgx_ecall(long ecall_no, void* ms);
 int sgx_raise(int event);
-void sgx_resume(void);
+void sgx_eresume(void);
 
 void async_exit_pointer(void);
 void eresume_pointer(void);
@@ -122,13 +122,16 @@ void async_exit_pointer_end(void);
 int get_tid_from_tcs(void* tcs);
 int clone_thread(void);
 int clone_thread_custom(void);
+int clone_thread_from_worker_process(void);
 
 void create_tcs_mapper(void* tcs_base, unsigned int thread_num);
 void get_tcs_mapper(void* tcs_base, unsigned int thread_num);
 int pal_thread_init(void* tcbptr);
 int pal_thread_init_custom(void* tcbptr);
+int pal_thread_init_from_worker_process(void* tcbptr);
 void map_tcs(unsigned int tid);
 void map_tcs_custom(unsigned int tid);
+void map_tcs_from_worker_process(unsigned int tid);
 void unmap_tcs(void);
 int current_enclave_thread_cnt(void);
 void thread_exit(int status);
@@ -202,3 +205,4 @@ int pd_event_sample_stack(struct perf_data* pd,  uint64_t ip, uint32_t pid, uint
                           uint64_t period, sgx_pal_gpr_t* gpr, void* stack, size_t stack_size);
 
 void stop_complete(void);
+void catch_stopped_thread(void);

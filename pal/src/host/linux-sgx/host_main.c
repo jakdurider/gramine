@@ -48,6 +48,7 @@ int first_worker;
 int eid;
 const char* eid_path = "/sharedVolume/enclave_id";
 int process_id;
+uint64_t stack_addr;
 
 static int read_file_fragment(int fd, void* buf, size_t size, off_t offset) {
     ssize_t ret;
@@ -639,6 +640,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
     }
     else {
         get_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
+        catch_stopped_thread();
     }
 
     struct enclave_dbginfo* dbg = (void*)DO_SYSCALL(mmap, DBGINFO_ADDR,

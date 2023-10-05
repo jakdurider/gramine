@@ -35,6 +35,8 @@ bool g_sgx_enable_stats = false;
 const char* tcs_fd_path = "/sharedVolume/tcs_map";
 static int tcs_map_fd;
 extern int process_id;
+extern uint64_t stack_addr;
+int worker_process_exit = 0;
 
 /* this function is called only on thread/process exit (never in the middle of thread exec) */
 void update_and_print_stats(bool process_wide) {
@@ -169,8 +171,25 @@ void map_tcs_custom(unsigned int tid) {
         }
         DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
         spinlock_unlock(&tcs_lock);
-        usleep(100000);
+        if (i == g_enclave_thread_num) usleep(10000);
     }
+}
+
+void map_tcs_from_worker_process(unsigned int tid) {
+    spinlock_lock(&tcs_lock);
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+    for (int i = 0; i < g_enclave_thread_num; ++i) {
+        if (g_enclave_thread_map[i].process_id == process_id &&
+            g_enclave_thread_map[i].thread_for_new_process &&
+            g_enclave_thread_map[i].stop_complete) {
+            g_enclave_thread_map[i].tid = tid;
+            pal_get_host_tcb()->tcs = g_enclave_thread_map[i].tcs;
+            break;
+        }
+    }
+
+    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+    spinlock_unlock(&tcs_lock);
 }
 
 void unmap_tcs(void) {
@@ -328,6 +347,64 @@ out:
 }
 
 __attribute_no_sanitize_address
+int pal_thread_init_from_worker_process(void* tcbptr) {
+    PAL_HOST_TCB* tcb = tcbptr;
+    int ret;
+
+    /* set GS reg of this thread to thread's TCB; after this point, can use pal_get_host_tcb() */
+    ret = DO_SYSCALL(arch_prctl, ARCH_SET_GS, tcb);
+    if (ret < 0) {
+        ret = -EPERM;
+        goto out;
+    }
+
+    if (tcb->alt_stack) {
+        stack_t ss = {
+            .ss_sp    = tcb->alt_stack,
+            .ss_flags = 0,
+            .ss_size  = ALT_STACK_SIZE - sizeof(*tcb)
+        };
+        ret = DO_SYSCALL(sigaltstack, &ss, NULL);
+        if (ret < 0) {
+            ret = -EPERM;
+            goto out;
+        }
+    }
+
+    int tid = DO_SYSCALL(gettid);
+    map_tcs_from_worker_process(tid); /* updates tcb->tcs */
+
+    if (!tcb->tcs) {
+        log_error(
+            "There are no available TCS pages left for a new thread!\n"
+            "Please try to increase sgx.max_threads in the manifest.\n"
+            "The current value is %d",
+            g_enclave_thread_num);
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    if (!tcb->stack) {
+        /* only first thread doesn't have a stack (it uses the one provided by Linux); first
+         * thread calls ecall_enclave_start() instead of ecall_thread_start() so just exit */
+        return 0;
+    }
+
+    /* not-first (child) thread, start it */
+    sgx_eresume();
+
+    unmap_tcs();
+    ret = 0;
+    worker_process_exit = 1;
+out:
+#ifdef ASAN
+    asan_unpoison_region((uintptr_t)tcb->stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
+#endif
+    DO_SYSCALL(munmap, tcb->stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
+    return ret;
+}
+
+__attribute_no_sanitize_address
 noreturn void thread_exit(int status) {
     PAL_HOST_TCB* tcb = pal_get_host_tcb();
 
@@ -471,6 +548,55 @@ int clone_thread_custom(void) {
     return 0;
 }
 
+int clone_thread_from_worker_process(void) {
+    int ret = 0;
+
+    void* stack = (void*)DO_SYSCALL(mmap, stack_addr, THREAD_STACK_SIZE + ALT_STACK_SIZE,
+                                    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    if (IS_PTR_ERR(stack))
+        return -ENOMEM;
+
+    /* Stack layout for the new thread looks like this (recall that stacks grow towards lower
+     * addresses on Linux on x86-64):
+     *
+     *       stack +--> +-------------------+
+     *                  |  child stack      | THREAD_STACK_SIZE
+     * child_stack +--> +-------------------+
+     *                  |  alternate stack  | ALT_STACK_SIZE - sizeof(PAL_HOST_TCB)
+     *         tcb +--> +-------------------+
+     *                  |  PAL TCB          | sizeof(PAL_HOST_TCB)
+     *                  +-------------------+
+     *
+     * Note that this whole memory region is zeroed out because we use mmap(). */
+
+    void* child_stack_top = stack + THREAD_STACK_SIZE;
+
+    /* initialize TCB at the top of the alternative stack */
+    PAL_HOST_TCB* tcb = child_stack_top + ALT_STACK_SIZE - sizeof(PAL_HOST_TCB);
+    pal_host_tcb_init(tcb, stack, child_stack_top);
+
+    /* align child_stack to 16 */
+    child_stack_top = ALIGN_DOWN_PTR(child_stack_top, 16);
+
+    // TODO: pal_thread_init() may fail during initialization (e.g. on TCS exhaustion), we should
+    // check its result (but this happens asynchronously, so it's not trivial to do).
+    ret = clone(pal_thread_init_from_worker_process, child_stack_top,
+                CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SYSVSEM | CLONE_THREAD | CLONE_SIGHAND,
+                tcb, /*parent_tid=*/NULL, /*tls=*/NULL, /*child_tid=*/NULL, thread_exit);
+
+    if (ret < 0) {
+        DO_SYSCALL(munmap, stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
+        return ret;
+    }
+
+    // wait until enclave thread done
+    while(worker_process_exit == 0) {
+        usleep(10000);
+    }
+
+    return 0;
+}
+
 int get_tid_from_tcs(void* tcs) {
     int index = (sgx_arch_tcs_t*)tcs - g_enclave_tcs;
     DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
@@ -502,4 +628,25 @@ void stop_complete(void) {
 
     DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
+}
+
+void catch_stopped_thread(void) {
+    int i = g_enclave_thread_num;
+    while(i == g_enclave_thread_num) {
+        spinlock_lock(&tcs_lock);
+        DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+        for (i = 0; i < g_enclave_thread_num; ++i) {
+            if (g_enclave_thread_map[i].thread_for_new_process &&
+                g_enclave_thread_map[i].used_by_new_process == false &&
+                g_enclave_thread_map[i].stop_complete) {
+                stack_addr = g_enclave_thread_map[i].stack;
+                g_enclave_thread_map[i].process_id = process_id;
+                g_enclave_thread_map[i].used_by_new_process = true;
+                break;
+            }
+        }
+        DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+        spinlock_unlock(&tcs_lock);
+        if (i == g_enclave_thread_num) usleep(10000);
+    }
 }
