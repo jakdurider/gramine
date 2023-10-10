@@ -796,7 +796,6 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
     }
     else {
         get_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
-        catch_stopped_thread();
     }
 
     struct enclave_dbginfo* dbg = (void*)DO_SYSCALL(mmap, DBGINFO_ADDR,
@@ -1299,14 +1298,6 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
     if (IS_PTR_ERR(alt_stack))
         return -ENOMEM;
 
-    /* initialize TCB at the top of the alternative stack */
-    PAL_HOST_TCB* tcb = alt_stack + ALT_STACK_SIZE - sizeof(PAL_HOST_TCB);
-    pal_host_tcb_init(tcb, /*stack=*/NULL,
-                      alt_stack); /* main thread uses the stack provided by Linux */
-    ret = pal_thread_init(tcb);
-    if (ret < 0)
-        return ret;
-
     uint64_t end_time;
     DO_SYSCALL(gettimeofday, &tv, NULL);
     end_time = tv.tv_sec * 1000000UL + tv.tv_usec;
@@ -1319,12 +1310,26 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
                    end_time - start_time);
     }
 
-    /* start running trusted PAL */
-    ecall_enclave_start(enclave->libpal_uri, args, args_size, env, env_size, parent_stream_fd,
-                        &qe_targetinfo, &topo_info, &dns_conf, enclave->edmm_enabled,
-                        reserved_mem_ranges, reserved_mem_ranges_size);
+    if (master) {
+        /* initialize TCB at the top of the alternative stack */
+        PAL_HOST_TCB* tcb = alt_stack + ALT_STACK_SIZE - sizeof(PAL_HOST_TCB);
+        pal_host_tcb_init(tcb, /*stack=*/NULL,
+                        alt_stack); /* main thread uses the stack provided by Linux */
+        ret = pal_thread_init(tcb);
+        if (ret < 0)
+            return ret;
 
-    unmap_tcs();
+        /* start running trusted PAL */
+        ecall_enclave_start(enclave->libpal_uri, args, args_size, env, env_size, parent_stream_fd,
+                            &qe_targetinfo, &topo_info, &dns_conf, enclave->edmm_enabled,
+                            reserved_mem_ranges, reserved_mem_ranges_size);
+
+        unmap_tcs();
+    }
+    else {
+        clone_thread_from_worker_process();
+    }
+
     DO_SYSCALL(munmap, alt_stack, ALT_STACK_SIZE);
     DO_SYSCALL(exit, 0);
     die_or_inf_loop();
