@@ -54,6 +54,9 @@ int process_id;
 uint64_t stack_addr;
 int shared_fds[MAX_FDS] = {0, };
 
+void* futex_start;
+int futex_fd;
+
 int send_fd(int sock, int fd) {
     // This functin sends files descriptors voer unix domain sockets
     struct msghdr msg;
@@ -1463,6 +1466,42 @@ int main(int argc, char* argv[], char* envp[]) {
         } 
         fclose(eid_fpw);
     }
+
+    /* sharing futex memory between multiple processes */
+    if (master) {
+        futex_fd = DO_SYSCALL(open, "/sharedVolume/futex_map", O_RDWR | O_CREAT, 0666);
+        if (futex_fd < 0) {
+            log_always("futex map creation failed");
+        }
+
+        DO_SYSCALL(ftruncate, futex_fd, PAGE_SIZE * FUTEX_ENTRY_NUM);
+        futex_start = (void*) DO_SYSCALL(mmap, NULL, PAGE_SIZE * FUTEX_ENTRY_NUM, PROT_READ | PROT_WRITE, MAP_SHARED, futex_fd, 0);
+        log_always("futex_start: %p", futex_start);
+
+        FILE* futex_fpw = fopen("/sharedVolume/futex_addr", "w+");
+        fprintf(futex_fpw, "%p", futex_start);
+
+        fclose(futex_fpw);
+    }
+    else {
+        futex_fd = DO_SYSCALL(open, "/sharedVolume/futex_map", O_RDWR, 0666);
+        if (futex_fd < 0) {
+            log_always("futex map open failed");
+        }
+
+        FILE* futex_fpw = fopen("/sharedVolume/futex_addr", "r");
+        fscanf(futex_fpw, "%p", &futex_start);
+        log_always("read futex_start: %p", futex_start);
+
+        fclose(futex_fpw);
+
+        void* futex_start_addr = (void*) DO_SYSCALL(mmap, futex_start, PAGE_SIZE * FUTEX_ENTRY_NUM, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, futex_fd, 0);
+        if (futex_start_addr != futex_start) {
+            log_always("wrong mmap futex");
+            return -EINVAL;
+        }
+    }
+
 
     /* Grow the stack of the main thread to THREAD_STACK_SIZE by probing each stack page above
      * the current stack pointer (Linux dynamically grows the stack of the main thread but gets

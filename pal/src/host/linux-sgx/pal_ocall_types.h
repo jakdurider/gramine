@@ -26,7 +26,9 @@ typedef long (*sgx_ocall_fn_t)(void*);
 enum {
     OCALL_EXIT = 0,
     OCALL_MMAP_UNTRUSTED,
+    OCALL_MMAP_UNTRUSTED_FUTEX,
     OCALL_MUNMAP_UNTRUSTED,
+    OCALL_MUNMAP_UNTRUSTED_FUTEX,
     OCALL_CPUID,
     OCALL_OPEN,
     OCALL_CLOSE,
@@ -93,9 +95,18 @@ struct ocall_mmap_untrusted {
     off_t offset;
 };
 
+struct ocall_mmap_untrusted_futex {
+    void *addr;
+    int entry_num;
+};
+
 struct ocall_munmap_untrusted {
     const void* addr;
     size_t size;
+};
+
+struct ocall_munmap_untrusted_futex {
+    int entry_num;
 };
 
 struct ocall_cpuid {

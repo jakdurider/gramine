@@ -244,6 +244,54 @@ int ocall_mmap_untrusted(void** addrptr, size_t size, int prot, int flags, int f
     return 0;
 }
 
+int ocall_mmap_untrusted_futex(void **addrptr, int entry_num) {
+    int retval = 0;
+    struct ocall_mmap_untrusted_futex* ocall_mmap_futex_args;
+
+    void* old_ustack = sgx_prepare_ustack();
+    ocall_mmap_futex_args = sgx_alloc_on_ustack_aligned(
+        sizeof(*ocall_mmap_futex_args), alignof(*ocall_mmap_futex_args));
+
+    if (!ocall_mmap_futex_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    if (!addrptr) {
+        sgx_reset_ustack(old_ustack);
+        return -EINVAL;
+    }
+
+    void* requested_addr = *addrptr;
+
+    requested_addr = NULL; /* for sanity */
+
+    WRITE_ONCE(ocall_mmap_futex_args->addr, requested_addr);
+    WRITE_ONCE(ocall_mmap_futex_args->entry_num, entry_num);
+
+    do {
+        retval = sgx_exitless_ocall(OCALL_MMAP_UNTRUSTED_FUTEX, ocall_mmap_futex_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0) {
+        if (retval != -EACCES && retval != -EAGAIN && retval != -EBADF && retval != -EINVAL &&
+                retval != -ENFILE && retval != -ENODEV && retval != -ENOMEM && retval != -EPERM) {
+            retval = -EPERM;
+        }
+        sgx_reset_ustack(old_ustack);
+        return retval;
+    }
+
+    void* returned_addr = COPY_UNTRUSTED_VALUE(&ocall_mmap_futex_args->addr);
+
+    /* update addrptr with the mmap'ed address */
+    *addrptr = returned_addr;
+
+    sgx_reset_ustack(old_ustack);
+
+    return 0;
+}
+
 int ocall_munmap_untrusted(const void* addr, size_t size) {
     int retval = 0;
     struct ocall_munmap_untrusted* ocall_munmap_args;
@@ -274,6 +322,32 @@ int ocall_munmap_untrusted(const void* addr, size_t size) {
     return retval;
 }
 
+int ocall_munmap_untrusted_futex(int entry_num) {
+    int retval = 0;
+    struct ocall_munmap_untrusted_futex* ocall_munmap_futex_args;
+
+    void* old_ustack = sgx_prepare_ustack();
+    ocall_munmap_futex_args = sgx_alloc_on_ustack_aligned(sizeof(*ocall_munmap_futex_args),
+                                                    alignof(*ocall_munmap_futex_args));
+    if (!ocall_munmap_futex_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    WRITE_ONCE(ocall_munmap_futex_args->entry_num, entry_num);
+
+    do {
+        retval = sgx_exitless_ocall(OCALL_MUNMAP_UNTRUSTED_FUTEX, ocall_munmap_futex_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -EINVAL) {
+        retval = -EPERM;
+    }
+
+    sgx_reset_ustack(old_ustack);
+    return retval;
+
+}
 /*
  * Memorize untrusted memory area to avoid mmap/munmap per each read/write IO. Because this cache
  * is per-thread, we don't worry about concurrency. The cache will be carried over thread

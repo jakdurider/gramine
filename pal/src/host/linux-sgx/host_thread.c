@@ -26,7 +26,7 @@ struct thread_map {
     bool used_by_new_process;
     int process_id; // which process(container) is using this thread
     bool stop_complete; // to indicate this thread stops from master process
-    char* socket_path; // socket path for sending/receiving file descriptors
+    char socket_path[30]; // socket path for sending/receiving file descriptors
 };
 
 static sgx_arch_tcs_t* g_enclave_tcs;

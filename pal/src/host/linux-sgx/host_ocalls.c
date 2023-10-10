@@ -36,6 +36,7 @@ rpc_queue_t* g_rpc_queue = NULL; /* pointer to untrusted queue */
 
 extern int master;
 extern int shared_fds[MAX_FDS];
+extern void* futex_start;
 
 static long sgx_ocall_exit(void* args) {
     struct ocall_exit* ocall_exit_args = args;
@@ -103,9 +104,31 @@ static long sgx_ocall_mmap_untrusted(void* args) {
     return 0;
 }
 
+static long sgx_ocall_mmap_untrusted_futex(void* args) {
+    struct ocall_mmap_untrusted_futex* ocall_mmap_futex_args = args;
+
+    int entry_num = ocall_mmap_futex_args->entry_num;
+
+    uint64_t futex_addr = (uint64_t) futex_start;
+    futex_addr += PAGE_SIZE * entry_num;
+    memset((void*)futex_addr, 0, PAGE_SIZE);
+
+    if (IS_PTR_ERR(futex_addr))
+        return PTR_TO_ERR(futex_addr);
+
+    ocall_mmap_futex_args->addr = (void*) futex_addr;
+    return 0;
+}
+
 static long sgx_ocall_munmap_untrusted(void* args) {
     struct ocall_munmap_untrusted* ocall_munmap_args = args;
     DO_SYSCALL(munmap, ocall_munmap_args->addr, ocall_munmap_args->size);
+    return 0;
+}
+
+static long sgx_ocall_munmap_untrusted_futex(void* args) {
+    struct ocall_munmap_untrusted_futex* ocall_munmap_futex_args = args;
+    memset(futex_start + ocall_munmap_futex_args->entry_num * PAGE_SIZE, 0, PAGE_SIZE);
     return 0;
 }
 
@@ -258,7 +281,6 @@ static long sgx_ocall_clone_thread_custom(void* args) {
 
 static long sgx_ocall_copy_fd(void* args) {
     struct ocall_copy_fd* ocall_copy_fd_args = (struct ocall_copy_fd*)args;
-    long ret;
 
     // only master process should copy fd
     if (!master) {
@@ -270,7 +292,6 @@ static long sgx_ocall_copy_fd(void* args) {
 
 static long sgx_ocall_delete_fd(void* args) {
     struct ocall_delete_fd* ocall_delete_fd_args = (struct ocall_delete_fd*)args;
-    long ret;
 
     // only master process should delete fd
     if (!master) {
@@ -807,7 +828,9 @@ static long sgx_ocall_edmm_restrict_pages_perm(void* _args) {
 sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_EXIT]                     = sgx_ocall_exit,
     [OCALL_MMAP_UNTRUSTED]           = sgx_ocall_mmap_untrusted,
+    [OCALL_MMAP_UNTRUSTED_FUTEX]     = sgx_ocall_mmap_untrusted_futex,
     [OCALL_MUNMAP_UNTRUSTED]         = sgx_ocall_munmap_untrusted,
+    [OCALL_MUNMAP_UNTRUSTED_FUTEX]   = sgx_ocall_munmap_untrusted_futex,
     [OCALL_CPUID]                    = sgx_ocall_cpuid,
     [OCALL_OPEN]                     = sgx_ocall_open,
     [OCALL_CLOSE]                    = sgx_ocall_close,

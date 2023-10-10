@@ -15,8 +15,10 @@
 noreturn void ocall_exit(int exitcode, int is_exitgroup);
 
 int ocall_mmap_untrusted(void** addrptr, size_t size, int prot, int flags, int fd, off_t offset);
+int ocall_mmap_untrusted_futex(void** addrptr, int entry_num);
 
 int ocall_munmap_untrusted(const void* addr, size_t size);
+int ocall_munmap_untrusted_futex(int entry_num);
 
 int ocall_cpuid(unsigned int leaf, unsigned int subleaf, unsigned int values[static 4]);
 

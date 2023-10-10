@@ -216,3 +216,4 @@ int get_thread_index(void);
 const char* get_thread_socket_path(int idx);
 
 #define MAX_FDS 10000
+#define FUTEX_ENTRY_NUM 100

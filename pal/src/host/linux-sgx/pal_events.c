@@ -17,20 +17,40 @@
 #include "pal_linux_error.h"
 #include "spinlock.h"
 
+#define ENTRY_NUM 100
+int entry_arr[ENTRY_NUM] = {0, };
+void* futex_addr;
+
 static uintptr_t g_untrusted_page_next_entry = 0;
 static spinlock_t g_untrusted_page_lock = INIT_SPINLOCK_UNLOCKED;
 
 static int alloc_untrusted_futex_word(uint32_t** out_addr) {
+    static bool futex_start_initialized = false;
     spinlock_lock(&g_untrusted_page_lock);
     static_assert(PAGE_SIZE % sizeof(uint32_t) == 0, "required by the check below");
     if (g_untrusted_page_next_entry % PAGE_SIZE == 0) {
         void* untrusted_page;
-        int ret = ocall_mmap_untrusted(&untrusted_page, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                                       MAP_ANONYMOUS | MAP_PRIVATE, /*fd=*/-1, /*offset=*/0);
+        int entry_num = 0;
+        for (int i = 0; i < ENTRY_NUM; ++i) {
+            if (entry_arr[i] == 0) {
+                entry_num = i;
+                entry_arr[i] = 1;
+                break;
+            }
+        }
+
+        int ret = ocall_mmap_untrusted_futex(&untrusted_page, entry_num);
+
         if (ret < 0) {
             spinlock_unlock(&g_untrusted_page_lock);
             return unix_to_pal_error(ret);
         }
+
+        if (!futex_start_initialized) {
+            futex_addr = untrusted_page;
+            futex_start_initialized = true;
+        }
+
 #ifdef ASAN
         asan_poison_region((uintptr_t)untrusted_page, PAGE_SIZE, ASAN_POISON_HEAP_LEFT_REDZONE);
 #endif
@@ -89,7 +109,10 @@ static void free_untrusted_futex_word(uint32_t* addr) {
         asan_unpoison_region((uintptr_t)addr_to_munmap + sizeof(uint64_t),
                              PAGE_SIZE - sizeof(uint64_t));
 #endif
-        int ret = ocall_munmap_untrusted(addr_to_munmap, PAGE_SIZE);
+        int entry_num = (uint64_t)(addr_to_munmap - futex_addr) / PAGE_SIZE;
+        entry_arr[entry_num] = 0;
+
+        int ret = ocall_munmap_untrusted_futex(entry_num);
         if (ret < 0) {
             log_error("Failed to free untrusted page at %p: %s", addr_to_munmap,
                       unix_strerror(ret));
