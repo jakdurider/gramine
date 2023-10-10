@@ -131,3 +131,5 @@ int ocall_edmm_restrict_pages_perm(uint64_t addr, size_t count, uint64_t prot);
 int ocall_edmm_modify_pages_type(uint64_t addr, size_t count, uint64_t type);
 int ocall_edmm_remove_pages(uint64_t addr, size_t count);
 int ocall_stop(void);
+int ocall_copy_fd(int fd);
+int ocall_delete_fd(int fd);

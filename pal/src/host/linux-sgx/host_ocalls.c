@@ -34,6 +34,9 @@ extern bool g_vtune_profile_enabled;
 
 rpc_queue_t* g_rpc_queue = NULL; /* pointer to untrusted queue */
 
+extern int master;
+extern int shared_fds[MAX_FDS];
+
 static long sgx_ocall_exit(void* args) {
     struct ocall_exit* ocall_exit_args = args;
 
@@ -253,12 +256,45 @@ static long sgx_ocall_clone_thread_custom(void* args) {
     return clone_thread_custom();
 }
 
+static long sgx_ocall_copy_fd(void* args) {
+    struct ocall_copy_fd* ocall_copy_fd_args = (struct ocall_copy_fd*)args;
+    long ret;
+
+    // only master process should copy fd
+    if (!master) {
+        return 0;
+    }
+    shared_fds[ocall_copy_fd_args->fd] = 1;
+    return 0;
+}
+
+static long sgx_ocall_delete_fd(void* args) {
+    struct ocall_delete_fd* ocall_delete_fd_args = (struct ocall_delete_fd*)args;
+    long ret;
+
+    // only master process should delete fd
+    if (!master) {
+        return 0;
+    }
+    shared_fds[ocall_delete_fd_args->fd] = 0;
+    return 0;
+}
+
 static long sgx_ocall_stop(void* args) {
     __UNUSED(args);
 
+    // set this thread will be stopped so that other process can catch this thread
     stop_complete();
 
+    // send fds to catching process
+    int ret = send_fds_to_other_process();
+    if (ret < 0) {
+        return ret;
+    }
+
+    // this thread is not useful anymore
     sleep(100000000);
+
     return 0;
 }
 
@@ -818,6 +854,8 @@ sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_EDMM_MODIFY_PAGES_TYPE]   = sgx_ocall_edmm_modify_pages_type,
     [OCALL_EDMM_REMOVE_PAGES]        = sgx_ocall_edmm_remove_pages,
     [OCALL_EDMM_RESTRICT_PAGES_PERM] = sgx_ocall_edmm_restrict_pages_perm,
+    [OCALL_COPY_FD]                  = sgx_ocall_copy_fd,
+    [OCALL_DELETE_FD]                = sgx_ocall_delete_fd,
     [OCALL_STOP]                     = sgx_ocall_stop,
 };
 

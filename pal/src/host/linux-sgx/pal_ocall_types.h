@@ -74,6 +74,8 @@ enum {
     OCALL_EDMM_MODIFY_PAGES_TYPE,
     OCALL_EDMM_REMOVE_PAGES,
     OCALL_STOP,
+    OCALL_COPY_FD,
+    OCALL_DELETE_FD,
     OCALL_NR,
 };
 
@@ -355,6 +357,14 @@ struct ocall_edmm_modify_pages_type {
 struct ocall_edmm_remove_pages {
     uint64_t addr;
     size_t count;
+};
+
+struct ocall_copy_fd {
+    int fd;
+};
+
+struct ocall_delete_fd {
+    int fd;
 };
 
 #pragma pack(pop)

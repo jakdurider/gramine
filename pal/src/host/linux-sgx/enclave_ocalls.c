@@ -27,6 +27,7 @@
 #include "api.h"
 #include "asan.h"
 #include "cpu.h"
+#include "enclave_api.h"
 #include "enclave_ocalls.h"
 #include "pal_internal.h"
 #include "pal_ocall_types.h"
@@ -1022,6 +1023,62 @@ int ocall_clone_thread_custom(void) {
         retval = -EPERM;
     }
 
+    return retval;
+}
+
+int ocall_copy_fd(int fd) {
+    int retval = 0;
+    struct ocall_copy_fd* ocall_copy_fd_args;
+
+    void *old_ustack = sgx_prepare_ustack();
+
+    ocall_copy_fd_args = sgx_alloc_on_ustack_aligned(sizeof(*ocall_copy_fd_args),
+                                                      alignof(*ocall_copy_fd_args));
+    if (!ocall_copy_fd_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    WRITE_ONCE(ocall_copy_fd_args->fd, fd);
+
+    do {
+        retval = sgx_exitless_ocall(OCALL_COPY_FD, ocall_copy_fd_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -EINVAL && retval != -EMFILE && retval != -ENFILE &&
+            retval != -ENODEV && retval != -ENOMEM) {
+        retval = -EPERM;
+    }
+
+    sgx_reset_ustack(old_ustack);
+    return retval;
+}
+
+int ocall_delete_fd(int fd) {
+    int retval = 0;
+    struct ocall_delete_fd* ocall_delete_fd_args;
+
+    void *old_ustack = sgx_prepare_ustack();
+
+    ocall_delete_fd_args = sgx_alloc_on_ustack_aligned(sizeof(*ocall_delete_fd_args),
+                                                      alignof(*ocall_delete_fd_args));
+    if (!ocall_delete_fd_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    WRITE_ONCE(ocall_delete_fd_args->fd, fd);
+
+    do {
+        retval = sgx_exitless_ocall(OCALL_DELETE_FD, ocall_delete_fd_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -EINVAL && retval != -EMFILE && retval != -ENFILE &&
+            retval != -ENODEV && retval != -ENOMEM) {
+        retval = -EPERM;
+    }
+
+    sgx_reset_ustack(old_ustack);
     return retval;
 }
 

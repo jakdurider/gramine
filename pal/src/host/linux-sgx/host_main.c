@@ -32,6 +32,9 @@
 
 #include <stdio.h> // FILE operation
 #include <stdlib.h> // rand operation
+// for sending/receiving file desciprtors
+#include <string.h>
+#include <errno.h>
 
 const size_t g_page_size = PRESET_PAGESIZE;
 
@@ -49,6 +52,159 @@ int eid;
 const char* eid_path = "/sharedVolume/enclave_id";
 int process_id;
 uint64_t stack_addr;
+int shared_fds[MAX_FDS] = {0, };
+
+int send_fd(int sock, int fd) {
+    // This functin sends files descriptors voer unix domain sockets
+    struct msghdr msg;
+    struct iovec iov[1];
+    struct cmsghdr *cmsg = NULL;
+    char ctrl_buf[CMSG_SPACE(sizeof(int))];
+    char data[1];
+
+    memset(&msg, 0, sizeof(struct msghdr));
+    memset(ctrl_buf, 0, CMSG_SPACE(sizeof(int)));
+
+    data[0] = ' ';
+    iov[0].iov_base = data;
+    iov[0].iov_len = sizeof(data);
+
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+    msg.msg_controllen =  CMSG_SPACE(sizeof(int));
+    msg.msg_control = ctrl_buf;
+
+    cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+
+    int *fdptr = (int *) CMSG_DATA(cmsg);
+
+    *fdptr = fd;
+
+    return sendmsg(sock, &msg, 0);
+}
+
+int recv_fd(int sock, int* fd) {
+    struct msghdr msg;
+    struct iovec iov[1];
+    struct cmsghdr *cmsg = NULL;
+    char ctrl_buf[CMSG_SPACE(sizeof(int))];
+    char data[1];
+
+    memset(&msg, 0, sizeof(struct msghdr));
+    memset(ctrl_buf, 0, CMSG_SPACE(sizeof(int)));
+
+    iov[0].iov_base = data;
+    iov[0].iov_len = sizeof(data);
+
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_control = ctrl_buf;
+    msg.msg_controllen = CMSG_SPACE(sizeof(int));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+
+    int n = recvmsg(sock, &msg, 0);
+    if (n <= 0) {
+        log_always("errno: %d\n", errno);
+        return n;
+    }
+    cmsg = CMSG_FIRSTHDR(&msg);
+
+    int *fdptr = (int *) CMSG_DATA(cmsg);
+
+    if (!fdptr) {
+        log_always("recv fd error");
+        return -1;
+    }
+    *fd = *fdptr;
+    return 0;
+}
+
+int send_num(int sock, int fd_num) {
+    int ret = send(sock, &fd_num, sizeof(int), 0);
+    if (ret < 0) {
+        printf("send failed\n");
+        return ret;
+    }
+    return 0;
+}
+
+int recv_num(int sock, int *fd_num) {
+    int ret = recv(sock, fd_num, sizeof(int), 0);
+    if (ret < 0) {
+        log_always("recv failed\n");
+        return ret;
+    }
+    return 0;
+}
+
+int send_fds_to_other_process(void) {
+    struct sockaddr_un addr;
+    int sock;
+    int conn;
+
+    sock = socket(AF_UNIX, SOCK_STREAM, 0);
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strcpy(addr.sun_path, get_thread_socket_path(get_thread_index()));
+    bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+
+    listen(sock, 1);
+    conn = accept(sock, NULL, 0);
+
+    int send_fds_num = 0;
+    for (int i = 0; i < MAX_FDS; ++i) {
+        if (shared_fds[i] == 1) {
+            ++send_fds_num;
+        }
+    }
+    send_num(conn, send_fds_num);
+
+    for (int i = 0; i < MAX_FDS; ++i) {
+        if (shared_fds[i] == 1) {
+            send_fd(conn, i);
+            send_num(conn, i);
+        }
+    }
+
+    close(conn);
+    close(sock);
+
+    return 0;
+}
+
+int recv_fds_from_other_process(int catch_thread_idx) {
+    struct sockaddr_un addr;
+    int sock;
+    int conn;
+
+    sock = socket(AF_UNIX, SOCK_STREAM, 0);
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strcpy(addr.sun_path, get_thread_socket_path(catch_thread_idx));
+    conn = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+
+    int recv_fds_num;
+    recv_num(sock, &recv_fds_num);
+    for (int i = 0; i < recv_fds_num; ++i) {
+        int fd, fd_num;
+        recv_fd(sock, &fd);
+        recv_num(sock, &fd_num);
+        DO_SYSCALL(dup2, fd, fd_num);
+    }
+
+    close(conn);
+    close(sock);
+
+    return 0;
+}
 
 static int read_file_fragment(int fd, void* buf, size_t size, off_t offset) {
     ssize_t ret;
@@ -1292,6 +1448,9 @@ int main(int argc, char* argv[], char* envp[]) {
     }
 
     if (!master) {
+        int catch_idx = catch_stopped_thread();
+        recv_fds_from_other_process(catch_idx);
+
         FILE* eid_fpw = fopen(eid_path, "r");
         int temp_ret = fscanf(eid_fpw, "%d", &eid);
         if (temp_ret < 0) {

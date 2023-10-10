@@ -15,6 +15,8 @@
 #include "spinlock.h"
 
 #include <unistd.h> // sleep function
+#include <stdio.h> // sprintf function
+#include <string.h> // strcat function
 
 struct thread_map {
     unsigned int    tid;
@@ -24,6 +26,7 @@ struct thread_map {
     bool used_by_new_process;
     int process_id; // which process(container) is using this thread
     bool stop_complete; // to indicate this thread stops from master process
+    char* socket_path; // socket path for sending/receiving file descriptors
 };
 
 static sgx_arch_tcs_t* g_enclave_tcs;
@@ -123,6 +126,12 @@ void create_tcs_mapper(void* tcs_base, unsigned int thread_num) {
         g_enclave_thread_map[i].used_by_new_process = 0;
         g_enclave_thread_map[i].process_id = 0;
         g_enclave_thread_map[i].stop_complete = 0;
+
+        char* socket_path = "/sharedVolume/fd_socket";
+        char num[3];
+        sprintf(num, "%d", i);
+        strcat(socket_path, num);
+        snprintf(g_enclave_thread_map[i].socket_path, sizeof(g_enclave_thread_map[i].socket_path), socket_path);
     }
     DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
 }
@@ -630,7 +639,7 @@ void stop_complete(void) {
     spinlock_unlock(&tcs_lock);
 }
 
-void catch_stopped_thread(void) {
+int catch_stopped_thread(void) {
     int i = g_enclave_thread_num;
     while(i == g_enclave_thread_num) {
         spinlock_lock(&tcs_lock);
@@ -649,4 +658,13 @@ void catch_stopped_thread(void) {
         spinlock_unlock(&tcs_lock);
         if (i == g_enclave_thread_num) usleep(10000);
     }
+    return i;
+}
+
+int get_thread_index(void) {
+    return pal_get_host_tcb()->tcs - g_enclave_tcs;
+}
+
+const char* get_thread_socket_path(int index) {
+    return g_enclave_thread_map[index].socket_path;
 }

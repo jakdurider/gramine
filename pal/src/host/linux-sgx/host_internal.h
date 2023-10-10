@@ -205,4 +205,14 @@ int pd_event_sample_stack(struct perf_data* pd,  uint64_t ip, uint32_t pid, uint
                           uint64_t period, sgx_pal_gpr_t* gpr, void* stack, size_t stack_size);
 
 void stop_complete(void);
-void catch_stopped_thread(void);
+int catch_stopped_thread(void);
+int send_fd(int sock, int fd);
+int recv_fd(int sock, int *fd);
+int send_num(int sock, int fd_num);
+int recv_num(int sock, int *fd_num);
+int send_fds_to_other_process(void);
+int recv_fds_from_other_process(int catch_thread_idx);
+int get_thread_index(void);
+const char* get_thread_socket_path(int idx);
+
+#define MAX_FDS 10000
