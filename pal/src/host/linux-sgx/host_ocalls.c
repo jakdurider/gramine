@@ -38,6 +38,8 @@ extern int master;
 extern int shared_fds[MAX_FDS];
 extern void* futex_start;
 
+extern spinlock_t shared_fds_lock;
+
 static long sgx_ocall_exit(void* args) {
     struct ocall_exit* ocall_exit_args = args;
 
@@ -293,7 +295,11 @@ static long sgx_ocall_copy_fd(void* args) {
     if (!master) {
         return 0;
     }
+
+    spinlock_lock(&shared_fds_lock);
     shared_fds[ocall_copy_fd_args->fd] = 1;
+    spinlock_unlock(&shared_fds_lock);
+
     return 0;
 }
 
@@ -304,7 +310,11 @@ static long sgx_ocall_delete_fd(void* args) {
     if (!master) {
         return 0;
     }
+
+    spinlock_lock(&shared_fds_lock);
     shared_fds[ocall_delete_fd_args->fd] = 0;
+    spinlock_unlock(&shared_fds_lock);
+
     return 0;
 }
 

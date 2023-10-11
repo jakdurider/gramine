@@ -53,6 +53,7 @@ const char* eid_path = "/sharedVolume/enclave_id";
 int process_id;
 uint64_t stack_addr;
 int shared_fds[MAX_FDS] = {0, };
+spinlock_t shared_fds_lock = INIT_SPINLOCK_UNLOCKED;
 
 void* futex_start;
 int futex_fd;
@@ -161,6 +162,7 @@ int send_fds_to_other_process(void) {
     listen(sock, 1);
     conn = accept(sock, NULL, 0);
 
+    spinlock_lock(&shared_fds_lock);
     int send_fds_num = 0;
     for (int i = 0; i < MAX_FDS; ++i) {
         if (shared_fds[i] == 1) {
@@ -175,6 +177,7 @@ int send_fds_to_other_process(void) {
             send_num(conn, i);
         }
     }
+    spinlock_unlock(&shared_fds_lock);
 
     close(conn);
     close(sock);
