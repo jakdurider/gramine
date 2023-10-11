@@ -58,6 +58,8 @@ static int eventfd_pal_open(PAL_HANDLE* handle, const char* type, const char* ur
     hdl->eventfd.nonblocking = !!(options & PAL_OPTION_NONBLOCK);
     *handle = hdl;
 
+    ocall_copy_fd((*handle)->eventfd.fd);
+
     return 0;
 }
 
@@ -120,6 +122,8 @@ static int eventfd_pal_attrquerybyhdl(PAL_HANDLE handle, PAL_STREAM_ATTR* attr) 
 }
 
 static int eventfd_pal_close(PAL_HANDLE handle) {
+    ocall_delete_fd(handle->eventfd.fd);
+
     if (handle->hdr.type == PAL_TYPE_EVENTFD) {
         if (handle->eventfd.fd != PAL_IDX_POISON) {
             ocall_close(handle->eventfd.fd);

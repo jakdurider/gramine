@@ -1,6 +1,7 @@
 /build
 /install
 /obj-*
+/CI-Examples
 
 # No editor backup files.
 *.sw*

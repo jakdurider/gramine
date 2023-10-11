@@ -154,6 +154,9 @@ static int pipe_listen(PAL_HANDLE* handle, const char* name, pal_stream_options_
     }
 
     *handle = hdl;
+
+    ocall_copy_fd((*handle)->pipe.fd);
+
     return 0;
 }
 
@@ -221,6 +224,9 @@ static int pipe_waitforclient(PAL_HANDLE handle, PAL_HANDLE* client, pal_stream_
     __atomic_store_n(&clnt->pipe.handshake_done, true, __ATOMIC_RELEASE);
 
     *client = clnt;
+
+    ocall_copy_fd((*client)->pipe.fd);
+
     return 0;
 
 out_err:
@@ -304,6 +310,9 @@ static int pipe_connect(PAL_HANDLE* handle, const char* name, pal_stream_options
     __atomic_store_n(&hdl->pipe.handshake_helper_thread_hdl, thread_hdl, __ATOMIC_RELEASE);
 
     *handle = hdl;
+
+    ocall_copy_fd((*handle)->pipe.fd);
+
     return 0;
 }
 
@@ -418,6 +427,8 @@ static int64_t pipe_write(PAL_HANDLE handle, uint64_t offset, uint64_t len, cons
  * \returns 0 on success, negative PAL error code otherwise.
  */
 static int pipe_close(PAL_HANDLE handle) {
+    ocall_delete_fd(handle->pipe.fd);
+
     if (handle->pipe.fd != PAL_IDX_POISON) {
         while (!__atomic_load_n(&handle->pipe.handshake_done, __ATOMIC_ACQUIRE))
             CPU_RELAX();

@@ -16,7 +16,6 @@
 
 #include <unistd.h> // sleep function
 #include <stdio.h> // sprintf function
-#include <string.h> // strcat function
 
 struct thread_map {
     unsigned int    tid;
@@ -129,10 +128,10 @@ void create_tcs_mapper(void* tcs_base, unsigned int thread_num) {
         g_enclave_thread_map[i].process_id = 0;
         g_enclave_thread_map[i].stop_complete = 0;
 
-        char* socket_path = "/sharedVolume/fd_socket";
-        char num[3];
-        sprintf(num, "%d", i);
-        strcat(socket_path, num);
+        char socket_path[30] = "/sharedVolume/fd_socket000";
+        socket_path[23] = (i / 100) % 10;
+        socket_path[24] = (i / 10) % 10;
+        socket_path[25] = i % 10;
         snprintf(g_enclave_thread_map[i].socket_path, sizeof(g_enclave_thread_map[i].socket_path), socket_path);
     }
     DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
