@@ -86,6 +86,13 @@ static long sgx_ocall_exit(void* args) {
         die_or_inf_loop();
     }
 
+    if (!master) {
+        if (get_process_thread_cnt() == 0) {
+            DO_SYSCALL(exit_group, (int)ocall_exit_args->exitcode);
+            die_or_inf_loop();
+        }
+    }
+
     thread_exit((int)ocall_exit_args->exitcode);
     return 0;
 }

@@ -214,6 +214,7 @@ int send_fds_to_other_process(void);
 int recv_fds_from_other_process(int catch_thread_idx);
 int get_thread_index(void);
 const char* get_thread_socket_path(int idx);
+int get_process_thread_cnt(void);
 
 #define MAX_FDS 10000
 #define FUTEX_ENTRY_NUM 100

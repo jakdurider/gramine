@@ -35,11 +35,13 @@ static struct thread_map* g_enclave_thread_map;
 
 bool g_sgx_enable_stats = false;
 
+extern int master;
 const char* tcs_fd_path = "/sharedVolume/tcs_map";
 static int tcs_map_fd;
 extern int process_id;
 extern uint64_t stack_addr;
 int worker_process_exit = 0;
+int process_thread_cnt = 0;
 
 /* this function is called only on thread/process exit (never in the middle of thread exec) */
 void update_and_print_stats(bool process_wide) {
@@ -210,6 +212,10 @@ void unmap_tcs(void) {
 
     assert(index < g_enclave_thread_num);
 
+    if (!master) {
+        --process_thread_cnt;
+    }
+
     pal_get_host_tcb()->tcs = NULL;
     ((struct enclave_dbginfo*)DBGINFO_ADDR)->thread_tids[index] = 0;
     map->tid = 0;
@@ -245,6 +251,10 @@ __attribute_no_sanitize_address
 int pal_thread_init(void* tcbptr) {
     PAL_HOST_TCB* tcb = tcbptr;
     int ret;
+
+    if (!master) {
+        ++process_thread_cnt;
+    }
 
     /* set GS reg of this thread to thread's TCB; after this point, can use pal_get_host_tcb() */
     ret = DO_SYSCALL(arch_prctl, ARCH_SET_GS, tcb);
@@ -303,6 +313,10 @@ int pal_thread_init_custom(void* tcbptr) {
     PAL_HOST_TCB* tcb = tcbptr;
     int ret;
 
+    if (!master) {
+        ++process_thread_cnt;
+    }
+
     /* set GS reg of this thread to thread's TCB; after this point, can use pal_get_host_tcb() */
     ret = DO_SYSCALL(arch_prctl, ARCH_SET_GS, tcb);
     if (ret < 0) {
@@ -359,6 +373,10 @@ __attribute_no_sanitize_address
 int pal_thread_init_from_worker_process(void* tcbptr) {
     PAL_HOST_TCB* tcb = tcbptr;
     int ret;
+
+    if (!master) {
+        ++process_thread_cnt;
+    }
 
     /* set GS reg of this thread to thread's TCB; after this point, can use pal_get_host_tcb() */
     ret = DO_SYSCALL(arch_prctl, ARCH_SET_GS, tcb);
@@ -667,4 +685,8 @@ int get_thread_index(void) {
 
 const char* get_thread_socket_path(int index) {
     return g_enclave_thread_map[index].socket_path;
+}
+
+int get_process_thread_cnt(void) {
+    return process_thread_cnt;
 }
