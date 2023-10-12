@@ -58,6 +58,8 @@ spinlock_t shared_fds_lock = INIT_SPINLOCK_UNLOCKED;
 void* futex_start;
 int futex_fd;
 
+#define SEND_FD_START 30
+
 int send_fd(int sock, int fd) {
     // This functin sends files descriptors voer unix domain sockets
     struct msghdr msg;
@@ -131,9 +133,8 @@ int recv_fd(int sock, int* fd) {
 
     log_always("fd %d is received for our fd %d", data, *fd);
 
-    if (data > 30) {
+    if (data >= SEND_FD_START)
         DO_SYSCALL(dup2, *fd, data);
-    }
 
     return 0;
 }
@@ -173,14 +174,14 @@ int send_fds_to_other_process(void) {
 
     spinlock_lock(&shared_fds_lock);
     int send_fds_num = 0;
-    for (int i = 0; i < MAX_FDS; ++i) {
+    for (int i = SEND_FD_START; i < MAX_FDS; ++i) {
         if (shared_fds[i] == 1) {
             ++send_fds_num;
         }
     }
     send_num(conn, send_fds_num);
 
-    for (int i = 0; i < MAX_FDS; ++i) {
+    for (int i = SEND_FD_START; i < MAX_FDS; ++i) {
         if (shared_fds[i] == 1) {
             int ret;
             ret = send_fd(conn, i);

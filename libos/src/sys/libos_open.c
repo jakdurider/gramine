@@ -115,6 +115,11 @@ long libos_syscall_openat(int dfd, const char* filename, int flags, int mode) {
         return ++base;
     }
 
+    if (strcmp(filename, "/sharedVolume/CopyFdStart") == 0) {
+        PalExposeSignal(filename);
+        return ++base;
+    }
+
     /* Clear invalid flags. */
     flags &= O_ACCMODE | O_APPEND |  O_CLOEXEC | O_CREAT | O_DIRECT | O_DIRECTORY | O_DSYNC | O_EXCL
              | O_LARGEFILE | O_NOATIME | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK | O_PATH | O_SYNC

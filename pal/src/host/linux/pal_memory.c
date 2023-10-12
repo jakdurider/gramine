@@ -23,6 +23,10 @@
 uintptr_t g_vdso_start = 0;
 uintptr_t g_vdso_end = 0;
 
+int _PalExposeSignal(char* comment) {
+    return 0;
+}
+
 bool is_in_vdso(uintptr_t addr) {
     return (g_vdso_start || g_vdso_end) && g_vdso_start <= addr && addr < g_vdso_end;
 }

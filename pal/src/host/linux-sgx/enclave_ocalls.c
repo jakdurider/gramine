@@ -361,6 +361,7 @@ int ocall_munmap_untrusted_futex(int entry_num) {
  * indicates whether explicit munmap is needed at the end of such OCALL.
  */
 static int ocall_mmap_untrusted_cache(size_t size, void** addrptr, bool* need_munmap) {
+    /*
     int ret;
 
     *addrptr = NULL;
@@ -369,11 +370,11 @@ static int ocall_mmap_untrusted_cache(size_t size, void** addrptr, bool* need_mu
     struct untrusted_area* cache = &pal_get_enclave_tcb()->untrusted_area_cache;
 
     uint64_t in_use = 0;
-    if (!__atomic_compare_exchange_n(&cache->in_use, &in_use, 1, /*weak=*/false, __ATOMIC_RELAXED,
+    if (!__atomic_compare_exchange_n(&cache->in_use, &in_use, 1, false, __ATOMIC_RELAXED,
                                      __ATOMIC_RELAXED)) {
-        /* AEX signal handling case: cache is in use, so make explicit mmap/munmap */
+        //  AEX signal handling case: cache is in use, so make explicit mmap/munmap
         ret = ocall_mmap_untrusted(addrptr, size, PROT_READ | PROT_WRITE,
-                                   MAP_ANONYMOUS | MAP_PRIVATE, /*fd=*/-1, /*offset=*/0);
+                                   MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (ret < 0) {
             return ret;
         }
@@ -382,7 +383,7 @@ static int ocall_mmap_untrusted_cache(size_t size, void** addrptr, bool* need_mu
     }
     COMPILER_BARRIER();
 
-    /* normal execution case: cache was not in use, so use it/allocate new one for reuse */
+    // normal execution case: cache was not in use, so use it/allocate new one for reuse
     if (cache->valid) {
         if (cache->size >= size) {
             *addrptr = cache->addr;
@@ -398,7 +399,7 @@ static int ocall_mmap_untrusted_cache(size_t size, void** addrptr, bool* need_mu
     }
 
     ret = ocall_mmap_untrusted(addrptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,
-                               /*fd=*/-1, /*offset=*/0);
+                               -1, 0);
     if (ret < 0) {
         cache->valid = false;
         COMPILER_BARRIER();
@@ -408,6 +409,9 @@ static int ocall_mmap_untrusted_cache(size_t size, void** addrptr, bool* need_mu
         cache->addr  = *addrptr;
         cache->size  = size;
     }
+*/
+    int ret = ocall_mmap_untrusted(addrptr, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,
+                                   -1, 0);
     return ret;
 }
 
@@ -1169,6 +1173,39 @@ int ocall_stop(void) {
         retval = -EPERM;
     }
 
+    return retval;
+}
+
+int ocall_expose_signal(char* comment) {
+    int retval = 0;
+    size_t comment_size = comment ? strlen(comment) + 1 : 0;
+    struct ocall_expose_signal* ocall_expose_signal_args;
+
+    void* old_ustack = sgx_prepare_ustack();
+    ocall_expose_signal_args = sgx_alloc_on_ustack_aligned(sizeof(*ocall_expose_signal_args),
+                                                           alignof(*ocall_expose_signal_args));
+    if (!ocall_expose_signal_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    void* untrusted_comment = sgx_copy_to_ustack(comment, comment_size);
+    if (!untrusted_comment) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+    WRITE_ONCE(ocall_expose_signal_args->comment, untrusted_comment);
+
+    do {
+        retval = sgx_ocall(OCALL_EXPOSE_SIGNAL, ocall_expose_signal_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -EINVAL && retval != -EMFILE && retval != -ENFILE &&
+            retval != -ENODEV && retval != -ENOMEM) {
+        retval = -EPERM;
+    }
+
+    sgx_reset_ustack(old_ustack);
     return retval;
 }
 

@@ -78,6 +78,7 @@ enum {
     OCALL_STOP,
     OCALL_COPY_FD,
     OCALL_DELETE_FD,
+    OCALL_EXPOSE_SIGNAL,
     OCALL_NR,
 };
 
@@ -376,6 +377,10 @@ struct ocall_copy_fd {
 
 struct ocall_delete_fd {
     int fd;
+};
+
+struct ocall_expose_signal {
+    char* comment;
 };
 
 #pragma pack(pop)

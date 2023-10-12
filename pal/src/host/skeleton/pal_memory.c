@@ -10,6 +10,10 @@
 #include "pal_error.h"
 #include "pal_internal.h"
 
+int _PalExposeSignal(char* comment) {
+    return -PAL_ERROR_NOTIMPLEMENTED;
+}
+
 int _PalVirtualMemoryAlloc(void* addr, uint64_t size, pal_prot_flags_t prot) {
     return -PAL_ERROR_NOTIMPLEMENTED;
 }

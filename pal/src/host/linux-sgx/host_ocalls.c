@@ -40,6 +40,8 @@ extern void* futex_start;
 
 extern spinlock_t shared_fds_lock;
 
+int copy_fd_enable = 0;
+
 static long sgx_ocall_exit(void* args) {
     struct ocall_exit* ocall_exit_args = args;
 
@@ -332,6 +334,17 @@ static long sgx_ocall_stop(void* args) {
 
     // this thread is not useful anymore
     sleep(100000000);
+
+    return 0;
+}
+
+static long sgx_ocall_expose_signal(void* args) {
+    struct ocall_expose_signal* ocall_expose_signal_args = args;
+
+    if (strcmp("/sharedVolume/CopyFdStart", ocall_expose_signal_args->comment) == 0) {
+        copy_fd_enable = 1;
+        return 0;
+    }
 
     return 0;
 }
@@ -897,6 +910,7 @@ sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_COPY_FD]                  = sgx_ocall_copy_fd,
     [OCALL_DELETE_FD]                = sgx_ocall_delete_fd,
     [OCALL_STOP]                     = sgx_ocall_stop,
+    [OCALL_EXPOSE_SIGNAL]            = sgx_ocall_expose_signal,
 };
 
 static int rpc_thread_loop(void* arg) {

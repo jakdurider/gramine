@@ -12,6 +12,10 @@
 #include "pal_error.h"
 #include "pal_internal.h"
 
+int PalExposeSignal(char* comment) {
+    return _PalExposeSignal(comment);
+}
+
 int PalVirtualMemoryAlloc(void* addr, size_t size, pal_prot_flags_t prot) {
     if (!addr || !IS_ALLOC_ALIGNED_PTR(addr) || !size || !IS_ALLOC_ALIGNED(size)) {
         return -PAL_ERROR_INVAL;

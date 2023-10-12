@@ -54,3 +54,4 @@ PalGetSpecialKey
 PalDebugLog
 PalGetPalPublicState
 PalStop
+PalExposeSignal

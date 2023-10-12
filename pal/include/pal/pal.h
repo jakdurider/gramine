@@ -981,5 +981,6 @@ void PalDebugMapRemove(void* start_addr);
 void PalDebugDescribeLocation(uintptr_t addr, char* buf, size_t buf_size);
 
 void PalStop(void);
+int PalExposeSignal(char* comment);
 
 #undef INSIDE_PAL_H

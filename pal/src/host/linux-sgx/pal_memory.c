@@ -19,6 +19,11 @@
 #include "pal_linux.h"
 #include "pal_sgx.h"
 
+int _PalExposeSignal(char* comment) {
+    ocall_expose_signal(comment);
+    return 0;
+}
+
 int _PalVirtualMemoryAlloc(void* addr, uint64_t size, pal_prot_flags_t prot) {
     assert(WITHIN_MASK(prot, PAL_PROT_MASK));
     assert(IS_ALIGNED_PTR(addr, PAGE_SIZE) && IS_ALIGNED(size, PAGE_SIZE));

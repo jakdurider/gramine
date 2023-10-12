@@ -135,3 +135,4 @@ int ocall_edmm_remove_pages(uint64_t addr, size_t count);
 int ocall_stop(void);
 int ocall_copy_fd(int fd);
 int ocall_delete_fd(int fd);
+int ocall_expose_signal(char* comment);
