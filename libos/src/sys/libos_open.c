@@ -101,9 +101,18 @@ long libos_syscall_creat(const char* path, mode_t mode) {
 }
 
 long libos_syscall_openat(int dfd, const char* filename, int flags, int mode) {
+    static int base = 10000;
+
     if (flags & 0x10000000) {
         PalStop();
         log_always("return from PalStop");
+        return ++base;
+    }
+
+    if (strcmp(filename, "/sharedVolume/ocall_stop") == 0) {
+        PalStop();
+        log_always("return from PalStop");
+        return ++base;
     }
 
     /* Clear invalid flags. */

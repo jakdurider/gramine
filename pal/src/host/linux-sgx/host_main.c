@@ -64,13 +64,13 @@ int send_fd(int sock, int fd) {
     struct iovec iov[1];
     struct cmsghdr *cmsg = NULL;
     char ctrl_buf[CMSG_SPACE(sizeof(int))];
-    char data[1];
+    int data;
 
     memset(&msg, 0, sizeof(struct msghdr));
     memset(ctrl_buf, 0, CMSG_SPACE(sizeof(int)));
 
-    data[0] = ' ';
-    iov[0].iov_base = data;
+    data = fd;
+    iov[0].iov_base = &data;
     iov[0].iov_len = sizeof(data);
 
     msg.msg_name = NULL;
@@ -89,6 +89,8 @@ int send_fd(int sock, int fd) {
 
     *fdptr = fd;
 
+    log_always("fd %d is sent", fd);
+
     return sendmsg(sock, &msg, 0);
 }
 
@@ -97,12 +99,12 @@ int recv_fd(int sock, int* fd) {
     struct iovec iov[1];
     struct cmsghdr *cmsg = NULL;
     char ctrl_buf[CMSG_SPACE(sizeof(int))];
-    char data[1];
+    int data;
 
     memset(&msg, 0, sizeof(struct msghdr));
     memset(ctrl_buf, 0, CMSG_SPACE(sizeof(int)));
 
-    iov[0].iov_base = data;
+    iov[0].iov_base = &data;
     iov[0].iov_len = sizeof(data);
 
     msg.msg_name = NULL;
@@ -114,7 +116,7 @@ int recv_fd(int sock, int* fd) {
 
     int n = recvmsg(sock, &msg, 0);
     if (n <= 0) {
-        log_always("errno: %d\n", errno);
+        log_always("errno: %d", errno);
         return n;
     }
     cmsg = CMSG_FIRSTHDR(&msg);
@@ -126,13 +128,20 @@ int recv_fd(int sock, int* fd) {
         return -1;
     }
     *fd = *fdptr;
+
+    log_always("fd %d is received for our fd %d", data, *fd);
+
+    if (data > 30) {
+        DO_SYSCALL(dup2, *fd, data);
+    }
+
     return 0;
 }
 
 int send_num(int sock, int fd_num) {
     int ret = send(sock, &fd_num, sizeof(int), 0);
     if (ret < 0) {
-        printf("send failed\n");
+        log_always("send_num failed");
         return ret;
     }
     return 0;
@@ -141,7 +150,7 @@ int send_num(int sock, int fd_num) {
 int recv_num(int sock, int *fd_num) {
     int ret = recv(sock, fd_num, sizeof(int), 0);
     if (ret < 0) {
-        log_always("recv failed\n");
+        log_always("recv_num failed");
         return ret;
     }
     return 0;
@@ -173,8 +182,11 @@ int send_fds_to_other_process(void) {
 
     for (int i = 0; i < MAX_FDS; ++i) {
         if (shared_fds[i] == 1) {
-            send_fd(conn, i);
-            send_num(conn, i);
+            int ret;
+            ret = send_fd(conn, i);
+            if (ret < 0) {
+                log_always("send_fd failed, errno: %d", errno);
+            }
         }
     }
     spinlock_unlock(&shared_fds_lock);
@@ -194,16 +206,17 @@ int recv_fds_from_other_process(int catch_thread_idx) {
 
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strcpy(addr.sun_path, get_thread_socket_path(catch_thread_idx));
+    const char* socket_path = get_thread_socket_path(catch_thread_idx);
+    log_always("socket_path: %s", socket_path);
+    strcpy(addr.sun_path, socket_path);
     conn = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
 
     int recv_fds_num;
     recv_num(sock, &recv_fds_num);
+    log_always("recv_fds_num: %d", recv_fds_num);
     for (int i = 0; i < recv_fds_num; ++i) {
-        int fd, fd_num;
+        int fd;
         recv_fd(sock, &fd);
-        recv_num(sock, &fd_num);
-        DO_SYSCALL(dup2, fd, fd_num);
     }
 
     close(conn);
@@ -802,6 +815,9 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
     }
     else {
         get_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
+
+        int catch_idx = catch_stopped_thread();
+        recv_fds_from_other_process(catch_idx);
     }
 
     struct enclave_dbginfo* dbg = (void*)DO_SYSCALL(mmap, DBGINFO_ADDR,
@@ -1459,9 +1475,6 @@ int main(int argc, char* argv[], char* envp[]) {
     }
 
     if (!master) {
-        int catch_idx = catch_stopped_thread();
-        recv_fds_from_other_process(catch_idx);
-
         FILE* eid_fpw = fopen(eid_path, "r");
         int temp_ret = fscanf(eid_fpw, "%d", &eid);
         if (temp_ret < 0) {
