@@ -194,6 +194,8 @@ int send_fds_to_other_process(void) {
 
     close(conn);
     close(sock);
+    
+    remove(addr.sun_path);
 
     return 0;
 }
