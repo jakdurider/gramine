@@ -16,6 +16,8 @@ static size_t g_zero_pages_size = 0;
 
 extern const char* eid_path;
 
+extern uint64_t enclave_aliasing_time;
+
 int open_sgx_driver(void) {
     const char* paths_to_try[] = {
 #ifdef CONFIG_SGX_DRIVER_DEVICE
@@ -349,6 +351,11 @@ int create_enclave(sgx_arch_secs_t* secs, sgx_arch_token_t* token) {
 }
 
 int add_mappings_to_enclave(void* addr, unsigned long size, int prot, const char* comment) {
+    struct timeval tv; 
+    uint64_t start_time;
+    DO_SYSCALL(gettimeofday, &tv, NULL);
+    start_time = tv.tv_sec * 1000000UL + tv.tv_usec;
+    
     int ret;
 
     uint64_t mapped = DO_SYSCALL(mmap, addr, size, prot, MAP_FIXED | MAP_SHARED, g_isgx_device, 0);
@@ -358,6 +365,12 @@ int add_mappings_to_enclave(void* addr, unsigned long size, int prot, const char
         log_error("Cannot map enclave pages: ret: %d", ret);
         return ret;
     }
+    
+    uint64_t end_time;
+    DO_SYSCALL(gettimeofday, &tv, NULL);
+    end_time = tv.tv_sec * 1000000UL + tv.tv_usec;
+
+    enclave_aliasing_time += (end_time - start_time);
 
     return 0;
 }

@@ -58,6 +58,11 @@ spinlock_t shared_fds_lock = INIT_SPINLOCK_UNLOCKED;
 void* futex_start;
 int futex_fd;
 
+uint64_t enclave_aliasing_time = 0;
+uint64_t runtime_init_start;
+uint64_t runtime_init_end;
+struct timeval runtime_init_tv;
+
 #define SEND_FD_START 30
 
 int send_fd(int sock, int fd) {
@@ -1352,6 +1357,17 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
         unmap_tcs();
     }
     else {
+        FILE* fp = fopen("/scripts/result/enclave_aliasing_time.txt", "w");
+        fprintf(fp, "enclave_aliasing_time: %lu\n", enclave_aliasing_time / 1000);
+        fclose(fp);
+
+        DO_SYSCALL(gettimeofday, &runtime_init_tv, NULL);
+        runtime_init_end = runtime_init_tv.tv_sec * 1000000UL + runtime_init_tv.tv_usec;
+        
+        FILE* fp2 = fopen("/scripts/result/runtime_init_time_gramine.txt", "w");
+        fprintf(fp2, "runtime_init_time: %lu\n", (runtime_init_end - runtime_init_start) / 1000);
+        fclose(fp2);
+        
         clone_thread_from_worker_process();
     }
 
@@ -1438,6 +1454,9 @@ static int verify_hw_requirements(char* envp[]) {
 
 __attribute_no_sanitize_address
 int main(int argc, char* argv[], char* envp[]) {
+    DO_SYSCALL(gettimeofday, &runtime_init_tv, NULL);
+    runtime_init_start = runtime_init_tv.tv_sec * 1000000UL + runtime_init_tv.tv_usec;
+    
     char* manifest_path = NULL;
     int ret = 0;
     char* manifest = NULL;
