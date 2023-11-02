@@ -136,3 +136,4 @@ int ocall_stop(void);
 int ocall_copy_fd(int fd);
 int ocall_delete_fd(int fd);
 int ocall_expose_signal(char* comment);
+int ocall_get_edmm_time(int flag, int num);

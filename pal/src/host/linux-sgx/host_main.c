@@ -728,7 +728,7 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
 
             continue;
         }
-
+        
         void* data = NULL;
         if (areas[i].data_src != ZERO) {
             data = (void*)DO_SYSCALL(mmap, NULL, areas[i].size, PROT_READ | PROT_WRITE,
@@ -1303,7 +1303,7 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
             return -EPERM;
         }
     }
-
+    
     ret = initialize_enclave(enclave, enclave->raw_manifest_data);
     if (ret < 0)
         return ret;
@@ -1357,13 +1357,13 @@ static int load_enclave(struct pal_enclave* enclave, char* args, size_t args_siz
         unmap_tcs();
     }
     else {
+        DO_SYSCALL(gettimeofday, &runtime_init_tv, NULL);
+        runtime_init_end = runtime_init_tv.tv_sec * 1000000UL + runtime_init_tv.tv_usec;
+        
         FILE* fp = fopen("/scripts/result/enclave_aliasing_time.txt", "w");
         fprintf(fp, "enclave_aliasing_time: %lu\n", enclave_aliasing_time / 1000);
         fclose(fp);
 
-        DO_SYSCALL(gettimeofday, &runtime_init_tv, NULL);
-        runtime_init_end = runtime_init_tv.tv_sec * 1000000UL + runtime_init_tv.tv_usec;
-        
         FILE* fp2 = fopen("/scripts/result/runtime_init_time_gramine.txt", "w");
         fprintf(fp2, "runtime_init_time: %lu\n", (runtime_init_end - runtime_init_start) / 1000);
         fclose(fp2);

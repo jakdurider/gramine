@@ -2,6 +2,8 @@
 /* Copyright (C) 2014 Stony Brook University */
 
 #include <stddef.h> /* must be included before linux/signal.h */
+#include <stdio.h>
+#include <string.h>
 
 #include <asm/errno.h>
 #include <asm/ioctls.h>
@@ -41,6 +43,10 @@ extern void* futex_start;
 extern spinlock_t shared_fds_lock;
 
 int copy_fd_enable = 0;
+
+uint64_t enclave_creation_time_runtime = 0;
+uint64_t enclave_creation_time_exec = 0;
+int worker_init_flag = 0;
 
 static long sgx_ocall_exit(void* args) {
     struct ocall_exit* ocall_exit_args = args;
@@ -157,6 +163,23 @@ static long sgx_ocall_cpuid(void* args) {
 
 static long sgx_ocall_open(void* args) {
     struct ocall_open* ocall_open_args = args;
+    if (strcmp(ocall_open_args->pathname, "/scripts/result/runtime_start") == 0) {
+        worker_init_flag = 1;
+        log_always("worker init started in sgx_ocall_open!!!!");
+    }
+    if (strcmp(ocall_open_args->pathname, "/scripts/result/runtime_end") == 0) {
+        worker_init_flag = 0;
+        FILE* fp1 = fopen("/scripts/result/enclave_creation_time_runtime.txt", "w");
+        fprintf(fp1, "enclave_creation_time_runtime: %lu\n", enclave_creation_time_runtime / 1000);
+        fclose(fp1);
+        enclave_creation_time_runtime = 0;
+        log_always("worker init finished in sgx_ocall_open!!!!");
+    }
+    if (strcmp(ocall_open_args->pathname, "/scripts/result/latency_exec_time.txt") == 0) {
+        FILE* fp2 = fopen("/scripts/result/enclave_creation_time_exec.txt", "w");
+        fprintf(fp2, "enclave_creation_time_exec: %lu\n", enclave_creation_time_exec / 1000);
+        fclose(fp2);
+    }
     return DO_SYSCALL_INTERRUPTIBLE(open, ocall_open_args->pathname, ocall_open_args->flags,
                                     ocall_open_args->mode);
 }
@@ -855,6 +878,22 @@ static long sgx_ocall_edmm_restrict_pages_perm(void* _args) {
     return edmm_restrict_pages_perm(args->addr, args->count, args->prot);
 }
 
+static long sgx_ocall_get_edmm_time(void* args) {
+    struct ocall_get_edmm_time* ocall_get_edmm_time_args = args;
+    if (ocall_get_edmm_time_args->flag == 0) {
+        return current_enclave_thread_cnt();
+    }
+    else if (ocall_get_edmm_time_args->flag == 1) {
+        if (!master) {
+            enclave_creation_time_exec += ocall_get_edmm_time_args->num;
+        }
+        else if(worker_init_flag){
+            enclave_creation_time_runtime += ocall_get_edmm_time_args->num;
+        }
+    }
+    return 0;
+}
+
 sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_EXIT]                     = sgx_ocall_exit,
     [OCALL_MMAP_UNTRUSTED]           = sgx_ocall_mmap_untrusted,
@@ -911,6 +950,7 @@ sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_DELETE_FD]                = sgx_ocall_delete_fd,
     [OCALL_STOP]                     = sgx_ocall_stop,
     [OCALL_EXPOSE_SIGNAL]            = sgx_ocall_expose_signal,
+    [OCALL_GET_EDMM_TIME]            = sgx_ocall_get_edmm_time,
 };
 
 static int rpc_thread_loop(void* arg) {

@@ -79,6 +79,7 @@ enum {
     OCALL_COPY_FD,
     OCALL_DELETE_FD,
     OCALL_EXPOSE_SIGNAL,
+    OCALL_GET_EDMM_TIME,
     OCALL_NR,
 };
 
@@ -381,6 +382,11 @@ struct ocall_delete_fd {
 
 struct ocall_expose_signal {
     char* comment;
+};
+
+struct ocall_get_edmm_time {
+   int flag;
+   int num;
 };
 
 #pragma pack(pop)

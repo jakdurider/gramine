@@ -499,6 +499,34 @@ int ocall_open(const char* pathname, int flags, unsigned short mode) {
     return retval;
 }
 
+int ocall_get_edmm_time(int flag, int num) {
+    int retval = 0;
+    struct ocall_get_edmm_time* ocall_get_edmm_time_args;
+
+    void* old_ustack = sgx_prepare_ustack();
+    ocall_get_edmm_time_args = sgx_alloc_on_ustack_aligned(sizeof(*ocall_get_edmm_time_args),
+                                                   alignof(*ocall_get_edmm_time_args));
+
+    if (!ocall_get_edmm_time_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    WRITE_ONCE(ocall_get_edmm_time_args->flag, flag);
+    WRITE_ONCE(ocall_get_edmm_time_args->num, num);
+    
+    do {
+        retval = sgx_exitless_ocall(OCALL_GET_EDMM_TIME, ocall_get_edmm_time_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -EBADF && retval != -EIO) {
+        retval = -EPERM;
+    }
+
+    sgx_reset_ustack(old_ustack);
+    return retval;
+}
+
 int ocall_close(int fd) {
     int retval = 0;
     struct ocall_close* ocall_close_args;

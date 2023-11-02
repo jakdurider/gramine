@@ -232,7 +232,7 @@ int current_enclave_thread_cnt(void) {
     spinlock_lock(&tcs_lock);
     DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
     for (int i = 0; i < g_enclave_thread_num; i++)
-        if (g_enclave_thread_map[i].tid)
+        if (g_enclave_thread_map[i].tid || g_enclave_thread_map[i].process_id)
             ret++;
     DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
