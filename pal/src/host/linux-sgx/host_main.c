@@ -96,7 +96,7 @@ int send_fd(int sock, int fd) {
 
     *fdptr = fd;
 
-    log_always("fd %d is sent", fd);
+    // log_always("fd %d is sent", fd);
 
     return sendmsg(sock, &msg, 0);
 }
@@ -824,8 +824,27 @@ static int initialize_enclave(struct pal_enclave* enclave, const char* manifest_
     else {
         get_tcs_mapper((void*)tcs_area->addr, enclave->thread_num);
 
+        log_always("start catching stopped thread");
+        
+        struct timeval temp_tv;
+        DO_SYSCALL(gettimeofday, &temp_tv, NULL);
+        uint64_t catch_start_time = temp_tv.tv_sec * 1000000UL + temp_tv.tv_usec;
+        
         int catch_idx = catch_stopped_thread();
+        
+        DO_SYSCALL(gettimeofday, &temp_tv, NULL);
+        uint64_t catch_end_time = temp_tv.tv_sec * 1000000UL + temp_tv.tv_usec; 
+        log_always("catch : %lums", (catch_end_time - catch_start_time) / 1000); 
+        
+        DO_SYSCALL(gettimeofday, &temp_tv, NULL);
+        catch_start_time = temp_tv.tv_sec * 1000000UL + temp_tv.tv_usec;
+        
         recv_fds_from_other_process(catch_idx);
+        
+        DO_SYSCALL(gettimeofday, &temp_tv, NULL);
+        catch_end_time = temp_tv.tv_sec * 1000000UL + temp_tv.tv_usec;
+        log_always("recv_fd : %lums", (catch_end_time - catch_start_time) / 1000); 
+    
     }
 
     struct enclave_dbginfo* dbg = (void*)DO_SYSCALL(mmap, DBGINFO_ADDR,

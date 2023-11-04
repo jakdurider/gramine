@@ -155,7 +155,7 @@ static int pipe_listen(PAL_HANDLE* handle, const char* name, pal_stream_options_
 
     *handle = hdl;
 
-    ocall_copy_fd((*handle)->pipe.fd);
+    // ocall_copy_fd((*handle)->pipe.fd);
 
     return 0;
 }

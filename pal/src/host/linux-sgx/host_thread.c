@@ -157,6 +157,9 @@ void map_tcs(unsigned int tid) {
     DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
     for (int i = 0; i < g_enclave_thread_num; i++)
         if (!g_enclave_thread_map[i].tid) {
+            if (g_enclave_thread_map[i].process_id != 0) {
+                log_always("tid is 0, but not idle!!!!");
+            }
             g_enclave_thread_map[i].tid = tid;
             g_enclave_thread_map[i].process_id = process_id;
             pal_get_host_tcb()->tcs = g_enclave_thread_map[i].tcs;
@@ -170,24 +173,27 @@ void map_tcs(unsigned int tid) {
 void map_tcs_custom(unsigned int tid) {
     int i = g_enclave_thread_num;
     while (i == g_enclave_thread_num) {
-        spinlock_lock(&tcs_lock);
-        DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+        // spinlock_lock(&tcs_lock);
+        // DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
         for (i = 0; i < g_enclave_thread_num; ++i){
-            if (g_enclave_thread_map[i].tid == tid && g_enclave_thread_map[i].process_id == process_id) {
+            if (g_enclave_thread_map[i].tid == tid && g_enclave_thread_map[i].process_id == process_id && g_enclave_thread_map[i].thread_for_new_process) {
                 pal_get_host_tcb()->tcs = g_enclave_thread_map[i].tcs;
                 ((struct enclave_dbginfo*)DBGINFO_ADDR)->thread_tids[i] = tid;
                 break;
             }
         }
-        DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
-        spinlock_unlock(&tcs_lock);
-        if (i == g_enclave_thread_num) usleep(10000);
+        // DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+        // spinlock_unlock(&tcs_lock);
+        if (i == g_enclave_thread_num) {
+            log_always("map_tcs_custom failed, waiting...");
+            usleep(200000);
+        }
     }
 }
 
 void map_tcs_from_worker_process(unsigned int tid) {
-    spinlock_lock(&tcs_lock);
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+    // spinlock_lock(&tcs_lock);
+    // DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
     for (int i = 0; i < g_enclave_thread_num; ++i) {
         if (g_enclave_thread_map[i].process_id == process_id &&
             g_enclave_thread_map[i].thread_for_new_process &&
@@ -198,8 +204,8 @@ void map_tcs_from_worker_process(unsigned int tid) {
         }
     }
 
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
-    spinlock_unlock(&tcs_lock);
+    // DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+    // spinlock_unlock(&tcs_lock);
 }
 
 void unmap_tcs(void) {
@@ -230,11 +236,11 @@ void unmap_tcs(void) {
 int current_enclave_thread_cnt(void) {
     int ret = 0;
     spinlock_lock(&tcs_lock);
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
+    // DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
     for (int i = 0; i < g_enclave_thread_num; i++)
         if (g_enclave_thread_map[i].tid || g_enclave_thread_map[i].process_id)
             ret++;
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+    // DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     spinlock_unlock(&tcs_lock);
     return ret;
 }
@@ -553,19 +559,23 @@ int clone_thread_custom(void) {
                 tcb, /*parent_tid=*/NULL, /*tls=*/NULL, /*child_tid=*/NULL, thread_exit);
 
     if (ret < 0) {
+        log_always("clone_thread_custom failed!!!!!");
         DO_SYSCALL(munmap, stack, THREAD_STACK_SIZE + ALT_STACK_SIZE);
         return ret;
     }
 
-    log_always("clone_thread_custom of process_id: %d, tid: %u is called", process_id, ret);
 
     DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
     for (int i = 0; i < g_enclave_thread_num; ++i) {
         if (!g_enclave_thread_map[i].tid) {
+            if (g_enclave_thread_map[i].process_id != 0) {
+                log_always("tid is 0, but not idle!!!!");
+            }
             g_enclave_thread_map[i].tid = ret;
             g_enclave_thread_map[i].process_id = process_id;
             g_enclave_thread_map[i].thread_for_new_process = true;
             g_enclave_thread_map[i].stack = (uint64_t)stack;
+            log_always("clone_thread_custom of process_id: %d, tid: %u finished", process_id, ret);
             break;
         }
     }
@@ -617,7 +627,7 @@ int clone_thread_from_worker_process(void) {
 
     // wait until enclave thread done
     while(worker_process_exit == 0) {
-        usleep(10000);
+        usleep(200000);
     }
 
     return 0;
@@ -625,9 +635,7 @@ int clone_thread_from_worker_process(void) {
 
 int get_tid_from_tcs(void* tcs) {
     int index = (sgx_arch_tcs_t*)tcs - g_enclave_tcs;
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
     struct thread_map* map = &g_enclave_thread_map[index];
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
     if (index >= g_enclave_thread_num)
         return -EINVAL;
     if (!map->tid)
@@ -637,8 +645,8 @@ int get_tid_from_tcs(void* tcs) {
 }
 
 void stop_complete(void) {
-    spinlock_lock(&tcs_lock);
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_EX);
+    // spinlock_lock(&tcs_lock);
+    // DO_SYSCALL(flock, tcs_map_fd, LOCK_SH);
 
     unsigned int tid = DO_SYSCALL(gettid);
     int i;
@@ -652,8 +660,8 @@ void stop_complete(void) {
         log_always("stop_complete cannot find matching thread");
     }
 
-    DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
-    spinlock_unlock(&tcs_lock);
+    // DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
+    // spinlock_unlock(&tcs_lock);
 }
 
 int catch_stopped_thread(void) {
@@ -673,7 +681,7 @@ int catch_stopped_thread(void) {
         }
         DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
         spinlock_unlock(&tcs_lock);
-        if (i == g_enclave_thread_num) usleep(10000);
+        if (i == g_enclave_thread_num) usleep(process_id % 200000);
     }
     return i;
 }
