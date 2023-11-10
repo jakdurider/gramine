@@ -527,6 +527,34 @@ int ocall_get_edmm_time(int flag, int num) {
     return retval;
 }
 
+int ocall_eaug_batch(uint64_t addr, uint64_t size) {
+    int retval = 0;
+    struct ocall_eaug_batch* ocall_eaug_batch_args;
+
+    void* old_ustack = sgx_prepare_ustack();
+    ocall_eaug_batch_args = sgx_alloc_on_ustack_aligned(sizeof(*ocall_eaug_batch_args),
+                                                   alignof(*ocall_eaug_batch_args));
+
+    if (!ocall_eaug_batch_args) {
+        sgx_reset_ustack(old_ustack);
+        return -EPERM;
+    }
+
+    WRITE_ONCE(ocall_eaug_batch_args->addr, addr);
+    WRITE_ONCE(ocall_eaug_batch_args->size, size);
+    
+    do {
+        retval = sgx_exitless_ocall(OCALL_EAUG_BATCH, ocall_eaug_batch_args);
+    } while (retval == -EINTR);
+
+    if (retval < 0 && retval != -EBADF && retval != -EIO) {
+        retval = -EPERM;
+    }
+
+    sgx_reset_ustack(old_ustack);
+    return retval;
+}
+
 int ocall_close(int fd) {
     int retval = 0;
     struct ocall_close* ocall_close_args;

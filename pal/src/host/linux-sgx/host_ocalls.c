@@ -894,6 +894,12 @@ static long sgx_ocall_get_edmm_time(void* args) {
     return 0;
 }
 
+static long sgx_ocall_eaug_batch(void* args) {
+    struct ocall_eaug_batch* ocall_eaug_batch_args = args;
+        
+    return edmm_eaug_batch(ocall_eaug_batch_args->addr, ocall_eaug_batch_args->size);
+}
+
 sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_EXIT]                     = sgx_ocall_exit,
     [OCALL_MMAP_UNTRUSTED]           = sgx_ocall_mmap_untrusted,
@@ -951,6 +957,7 @@ sgx_ocall_fn_t ocall_table[OCALL_NR] = {
     [OCALL_STOP]                     = sgx_ocall_stop,
     [OCALL_EXPOSE_SIGNAL]            = sgx_ocall_expose_signal,
     [OCALL_GET_EDMM_TIME]            = sgx_ocall_get_edmm_time,
+    [OCALL_EAUG_BATCH]               = sgx_ocall_eaug_batch,
 };
 
 static int rpc_thread_loop(void* arg) {

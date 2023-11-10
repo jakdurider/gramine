@@ -80,6 +80,7 @@ enum {
     OCALL_DELETE_FD,
     OCALL_EXPOSE_SIGNAL,
     OCALL_GET_EDMM_TIME,
+    OCALL_EAUG_BATCH, 
     OCALL_NR,
 };
 
@@ -387,6 +388,16 @@ struct ocall_expose_signal {
 struct ocall_get_edmm_time {
    int flag;
    int num;
+};
+
+struct ocall_eaug_batch {
+    uint64_t addr;
+    uint64_t size;
+    uint64_t offset;
+    uint64_t length;
+    uint64_t secinfo;
+    uint64_t flags;
+    uint64_t count;
 };
 
 #pragma pack(pop)

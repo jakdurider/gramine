@@ -38,6 +38,8 @@ int sgx_edmm_add_pages(uint64_t addr, size_t count, uint64_t prot) {
         prot |= SGX_SECINFO_FLAGS_R;
     }
 
+    ret = ocall_eaug_batch(addr, count * PAGE_SIZE);
+
     for (size_t i = 0; i < count; i++) {
         /* SGX2 HW requires initial page permissions to be RW. */
         ret = sgx_eaccept(addr + i * PAGE_SIZE, (SGX_PAGE_TYPE_REG << SGX_SECINFO_FLAGS_TYPE_SHIFT)

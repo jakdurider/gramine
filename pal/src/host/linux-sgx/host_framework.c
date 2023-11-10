@@ -532,6 +532,47 @@ int add_pages_to_enclave(sgx_arch_secs_t* secs, void* addr, void* user_addr, uns
     return 0;
 }
 
+int edmm_eaug_batch(uint64_t addr, uint64_t size) {
+    int ret; 
+
+    struct sgx_enclave_add_pages param = {
+        .offset  = 0,
+        .src     = addr,
+        .length  = size,
+        .secinfo = 0,
+        .flags   = 0,
+        .count   = 1, /* input is 1 to eaug, output parameter, will be checked after IOCTL */
+    };
+    
+    assert(IS_ALIGNED_POW2(param.src, g_page_size));
+    
+    while (param.length > 0) {
+        param.count = 1;
+        do {
+            ret = DO_SYSCALL(ioctl, g_isgx_device, SGX_IOC_ENCLAVE_ADD_PAGES, &param);
+        } while (ret == -EBUSY);
+        if (ret < 0) {
+            if (ret == -EINTR)
+                continue;
+            log_error("Enclave add-pages IOCTL failed: %s", unix_strerror(ret));
+            return ret;
+        }
+
+        uint64_t added_size = ret > 0 ? (uint64_t)ret : param.count;
+        if (!added_size) {
+            log_error("Intel SGX driver did not perform EADD. This may indicate a buggy "
+                      "driver, please update to the most recent version.");
+            return -EPERM;
+        }
+
+        param.offset += added_size;
+        if (param.src != (uint64_t)g_zero_pages)
+            param.src += added_size;
+        param.length -= added_size;
+    }
+    return 0; 
+}
+
 int edmm_restrict_pages_perm(uint64_t addr, size_t count, uint64_t prot) {
     assert(addr >= g_pal_enclave.baseaddr);
 
