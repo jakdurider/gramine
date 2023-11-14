@@ -983,4 +983,9 @@ void PalDebugDescribeLocation(uintptr_t addr, char* buf, size_t buf_size);
 void PalStop(void);
 int PalExposeSignal(char* comment);
 
+#define BITMAP_BYTE_SIZE 0x1000000
+unsigned char mmap_bitmap[BITMAP_BYTE_SIZE];
+#define flag_BITMAP_BYTE_SIZE 0x8000000
+int mmap_flag_bitmap[flag_BITMAP_BYTE_SIZE];
+
 #undef INSIDE_PAL_H

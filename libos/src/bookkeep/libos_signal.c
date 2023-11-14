@@ -25,6 +25,7 @@
 #include "libos_vma.h"
 #include "pal.h"
 #include "toml_utils.h"
+#include "libos_flags_conv.h"
 
 static bool g_check_invalid_ptrs = true;
 
@@ -343,13 +344,22 @@ static void memfault_upcall(bool is_in_pal, uintptr_t addr, PAL_CONTEXT* context
     if (is_internal(get_cur_thread()) || context_is_libos(context)) {
         internal_fault("Internal memory fault", addr, context);
     }
-
     log_debug("memory fault at 0x%08lx (IP = 0x%08lx)", addr, pal_context_get_ip(context));
 
     siginfo_t info = {
         .si_addr = (void*)addr,
     };
     struct libos_vma_info vma_info;
+    if (!lookup_vma((void*)addr, &vma_info)) {
+        if (vma_info.flags & MAP_NORESERVE) {
+            uint64_t temp_addr = (uint64_t)addr;
+            int byteidx = temp_addr / 0x8000;
+            int bitidx = (temp_addr % 0x8000) / 0x1000; 
+            mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
+            PalVirtualMemoryAlloc((void*)addr, 0x1000, LINUX_PROT_TO_PAL(vma_info.prot, vma_info.flags));
+            return;
+        }
+    }
     if (!lookup_vma((void*)addr, &vma_info)) {
         if (vma_info.flags & VMA_INTERNAL) {
             internal_fault("Internal memory fault with VMA", addr, context);

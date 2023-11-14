@@ -44,6 +44,18 @@
                        | MAP_HUGE_2MB           \
                        | MAP_HUGE_1GB)
 
+static int addr_to_bitmap_byte_idx(uint64_t addr) {
+    return addr / 0x8000;
+}
+
+static int addr_to_bitmap_bit_idx(uint64_t addr) {
+    return (addr % 0x8000) / 0x1000; 
+}
+
+static int addr_to_flag_bitmap_idx(uint64_t addr) {
+    return addr / 0x1000; 
+}
+
 void* libos_syscall_mmap(void* addr, size_t length, int prot, int flags, int fd,
                          unsigned long offset) {
     struct libos_handle* hdl = NULL;
@@ -208,7 +220,19 @@ void* libos_syscall_mmap(void* addr, size_t length, int prot, int flags, int fd,
     /* From now on `addr` contains the actual address we want to map (and already bookkeeped). */
 
     if (!hdl) {
-        ret = PalVirtualMemoryAlloc(addr, length, LINUX_PROT_TO_PAL(prot, flags));
+        if (flags & MAP_NORESERVE) {
+            for (uint64_t i = 0; i < length; i += 0x1000) {
+                uint64_t temp_addr = (uint64_t)addr + i;
+                int byteidx = addr_to_bitmap_byte_idx(temp_addr);
+                int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
+                mmap_bitmap[byteidx] |= 1 << (7 - bitidx);
+                mmap_flag_bitmap[addr_to_flag_bitmap_idx(temp_addr)] = flags;
+            }
+            ret = 0;
+        }
+        else {
+            ret = PalVirtualMemoryAlloc(addr, length, LINUX_PROT_TO_PAL(prot, flags));
+        }
         if (ret < 0) {
             if (ret == -PAL_ERROR_DENIED) {
                 ret = -EPERM;
@@ -238,6 +262,7 @@ out_handle:
     if (ret < 0) {
         return (void*)ret;
     }
+
     return addr;
 }
 
@@ -298,6 +323,22 @@ long libos_syscall_mprotect(void* addr, size_t length, int prot) {
         }
     }
 
+    int byteidx = addr_to_bitmap_byte_idx((uint64_t)addr);
+    int bitidx = addr_to_bitmap_bit_idx((uint64_t)addr); 
+    int flags = mmap_flag_bitmap[addr_to_flag_bitmap_idx((uint64_t)addr)];
+    if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
+        ret = PalVirtualMemoryAlloc(addr, length, LINUX_PROT_TO_PAL(prot, flags));
+    } 
+    
+    for (uint64_t i = 0; i < length; i += 0x1000) {
+        uint64_t temp_addr = (uint64_t)addr + i;
+        int byteidx = addr_to_bitmap_byte_idx(temp_addr);
+        int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
+        if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
+            mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
+        }
+    }
+
     ret = PalVirtualMemoryProtect(addr, length, LINUX_PROT_TO_PAL(prot, /*map_flags=*/0));
     if (ret < 0) {
         return pal_to_unix_errno(ret);
@@ -347,9 +388,19 @@ long libos_syscall_munmap(void* _addr, size_t length) {
         if (ret < 0) {
             BUG();
         }
-
-        if (PalVirtualMemoryFree((void*)begin, end - begin) < 0) {
-            BUG();
+        
+        for (uint64_t temp_addr = begin; temp_addr < end; temp_addr += 0x1000) {
+            int byteidx = addr_to_bitmap_byte_idx(temp_addr);
+            int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
+            if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
+                mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
+                mmap_flag_bitmap[addr_to_flag_bitmap_idx(temp_addr)] = 0;
+            }
+            else {
+                if (PalVirtualMemoryFree((void*)temp_addr, 0x1000) < 0) {
+                    BUG();
+                }
+            }
         }
 
         bkeep_remove_tmp_vma(tmp_vma);
