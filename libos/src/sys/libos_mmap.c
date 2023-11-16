@@ -220,7 +220,7 @@ void* libos_syscall_mmap(void* addr, size_t length, int prot, int flags, int fd,
     /* From now on `addr` contains the actual address we want to map (and already bookkeeped). */
 
     if (!hdl) {
-        if (flags & MAP_NORESERVE) {
+        if ((flags & MAP_NORESERVE) && g_pal_public_state->edmm_enabled && g_pal_public_state->mmap_optimized) {
             for (uint64_t i = 0; i < length; i += 0x1000) {
                 uint64_t temp_addr = (uint64_t)addr + i;
                 int byteidx = addr_to_bitmap_byte_idx(temp_addr);
@@ -326,18 +326,20 @@ long libos_syscall_mprotect(void* addr, size_t length, int prot) {
     int byteidx = addr_to_bitmap_byte_idx((uint64_t)addr);
     int bitidx = addr_to_bitmap_bit_idx((uint64_t)addr); 
     int flags = mmap_flag_bitmap[addr_to_flag_bitmap_idx((uint64_t)addr)];
-    if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
-        ret = PalVirtualMemoryAlloc(addr, length, LINUX_PROT_TO_PAL(prot, flags));
-    } 
-    
-    for (uint64_t i = 0; i < length; i += 0x1000) {
-        uint64_t temp_addr = (uint64_t)addr + i;
-        int byteidx = addr_to_bitmap_byte_idx(temp_addr);
-        int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
+    if (g_pal_public_state->edmm_enabled && g_pal_public_state->mmap_optimized) {
         if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
-            mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
+            ret = PalVirtualMemoryAlloc(addr, length, LINUX_PROT_TO_PAL(prot, flags));
+        } 
+        for (uint64_t i = 0; i < length; i += 0x1000) {
+            uint64_t temp_addr = (uint64_t)addr + i;
+            int byteidx = addr_to_bitmap_byte_idx(temp_addr);
+            int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
+            if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
+                mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
+            }
         }
     }
+    
 
     ret = PalVirtualMemoryProtect(addr, length, LINUX_PROT_TO_PAL(prot, /*map_flags=*/0));
     if (ret < 0) {
@@ -388,19 +390,24 @@ long libos_syscall_munmap(void* _addr, size_t length) {
         if (ret < 0) {
             BUG();
         }
-        
-        for (uint64_t temp_addr = begin; temp_addr < end; temp_addr += 0x1000) {
-            int byteidx = addr_to_bitmap_byte_idx(temp_addr);
-            int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
-            if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
-                mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
-                mmap_flag_bitmap[addr_to_flag_bitmap_idx(temp_addr)] = 0;
-            }
-            else {
-                if (PalVirtualMemoryFree((void*)temp_addr, 0x1000) < 0) {
-                    BUG();
+        if (g_pal_public_state->edmm_enabled && g_pal_public_state->mmap_optimized) {
+            for (uint64_t temp_addr = begin; temp_addr < end; temp_addr += 0x1000) {
+                int byteidx = addr_to_bitmap_byte_idx(temp_addr);
+                int bitidx = addr_to_bitmap_bit_idx(temp_addr); 
+                if (mmap_bitmap[byteidx] & (1 << (7 - bitidx))) {
+                    mmap_bitmap[byteidx] &= ~(1 << (7 - bitidx));
+                    mmap_flag_bitmap[addr_to_flag_bitmap_idx(temp_addr)] = 0;
+                }
+                else {
+                    if (PalVirtualMemoryFree((void*)temp_addr, 0x1000) < 0) {
+                        BUG();
+                    }
                 }
             }
+        }
+        else {
+            if (PalVirtualMemoryFree((void*)begin, end - begin) < 0) 
+                BUG();
         }
 
         bkeep_remove_tmp_vma(tmp_vma);

@@ -351,7 +351,7 @@ static void memfault_upcall(bool is_in_pal, uintptr_t addr, PAL_CONTEXT* context
     };
     struct libos_vma_info vma_info;
     if (!lookup_vma((void*)addr, &vma_info)) {
-        if (vma_info.flags & MAP_NORESERVE) {
+        if ((vma_info.flags & MAP_NORESERVE) && g_pal_public_state->edmm_enabled && g_pal_public_state->mmap_optimized) {
             uint64_t temp_addr = (uint64_t)addr;
             int byteidx = temp_addr / 0x8000;
             int bitidx = (temp_addr % 0x8000) / 0x1000; 

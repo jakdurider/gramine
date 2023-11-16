@@ -627,7 +627,7 @@ int clone_thread_from_worker_process(void) {
 
     // wait until enclave thread done
     while(worker_process_exit == 0) {
-        usleep(200000);
+        usleep(1000000);
     }
 
     return 0;
@@ -681,7 +681,7 @@ int catch_stopped_thread(void) {
         }
         DO_SYSCALL(flock, tcs_map_fd, LOCK_UN);
         spinlock_unlock(&tcs_lock);
-        if (i == g_enclave_thread_num) usleep(process_id % 200000);
+        if (i == g_enclave_thread_num) usleep(200000);
     }
     return i;
 }

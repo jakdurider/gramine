@@ -174,6 +174,8 @@ struct pal_public_state {
 
     bool extra_runtime_domain_names_conf;
     struct pal_dns_host_conf dns_host;
+    bool edmm_enabled;
+    bool mmap_optimized;
 };
 
 /* We cannot mark this as returning a pointer to `const` object, because LibOS can

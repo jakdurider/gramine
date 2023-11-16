@@ -573,6 +573,8 @@ noreturn void pal_linux_main(void* uptr_libpal_uri, size_t libpal_uri_len, void*
      * set below. */
     g_pal_public_state.memory_address_start = g_pal_linuxsgx_state.heap_min;
     g_pal_public_state.memory_address_end = g_pal_linuxsgx_state.heap_max;
+    g_pal_public_state.edmm_enabled = edmm_enabled;
+    g_pal_public_state.mmap_optimized = false;
 
     if (parent_stream_fd < 0) {
         /* First process does not have reserved memory ranges. */
