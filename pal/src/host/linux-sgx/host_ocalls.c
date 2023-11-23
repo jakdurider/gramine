@@ -346,6 +346,7 @@ static long sgx_ocall_delete_fd(void* args) {
 static long sgx_ocall_stop(void* args) {
     __UNUSED(args);
 
+    log_always("ocall_stop called");
     // set this thread will be stopped so that other process can catch this thread
     stop_complete();
 
