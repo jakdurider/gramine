@@ -1,0 +1,30 @@
+# Hello World manifest file example
+
+loader.entrypoint = "file:{{ gramine.libos }}"
+libos.entrypoint = "/bfs"
+loader.log_level = "{{ log_level }}"
+
+loader.insecure__use_cmdline_argv = true
+loader.env.LD_LIBRARY_PATH = "/lib:{{ arch_libdir }}:/usr/{{ arch_libdir }}:/usr/local/lib"
+
+fs.mounts = [
+  { path = "/lib", uri = "file:{{ gramine.runtimedir() }}" },
+  { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },
+  { path = "/usr/{{ arch_libdir }}", uri = "file:/usr/{{ arch_libdir }}" },
+  #{ path = "/bfs", uri = "file:bfs" },
+]
+
+sgx.preheat_enclave = true
+sgx.enclave_size = "1G"
+sgx.debug = true
+sgx.edmm_enable = {{ 'true' if env.get('EDMM', '0') == '1' else 'false' }}
+sgx.max_threads = 32
+
+sgx.trusted_files = [
+  "file:{{ gramine.libos }}",
+  "file:bfs",
+  "file:{{ gramine.runtimedir() }}/",
+  "file:src/",
+  "file:{{ arch_libdir }}/",
+  "file:/usr/{{ arch_libdir }}/",
+]
