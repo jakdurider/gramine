@@ -27,6 +27,9 @@
 #include "toml_utils.h"
 #include "libos_flags_conv.h"
 
+extern unsigned char mmap_bitmap[BITMAP_BYTE_SIZE];
+extern int mmap_flag_bitmap[flag_BITMAP_BYTE_SIZE];
+
 static bool g_check_invalid_ptrs = true;
 
 void sigaction_make_defaults(struct __kernel_sigaction* sig_action) {

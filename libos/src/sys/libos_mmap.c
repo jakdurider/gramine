@@ -44,6 +44,9 @@
                        | MAP_HUGE_2MB           \
                        | MAP_HUGE_1GB)
 
+unsigned char mmap_bitmap[BITMAP_BYTE_SIZE];
+int mmap_flag_bitmap[flag_BITMAP_BYTE_SIZE];
+
 static int addr_to_bitmap_byte_idx(uint64_t addr) {
     return addr / 0x8000;
 }
